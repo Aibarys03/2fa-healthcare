@@ -76,3 +76,41 @@ def download_model_if_needed(model_path: str = "models/best_model.pth"):
     except Exception as e:
         print(f"✗ Не удалось скачать модель: {e}")
         return False
+def get_embedding(user_id: str):
+    """Получить эмбеддинг пользователя из БД."""
+    try:
+        res = db().table("user_embeddings") \
+            .select("embedding") \
+            .eq("user_id", user_id) \
+            .execute()
+        return res.data[0]["embedding"] if res.data else None
+    except Exception as e:
+        print(f"DB get_embedding error: {e}")
+        return None
+
+def save_embedding(user_id: str, embedding: list):
+    """Сохранить эмбеддинг пользователя в БД."""
+    try:
+        db().table("user_embeddings").upsert({
+            "user_id":   user_id,
+            "embedding": embedding
+        }).execute()
+    except Exception as e:
+        print(f"DB save_embedding error: {e}")
+
+def get_all_users() -> list:
+    """Получить список всех зарегистрированных пользователей."""
+    try:
+        res = db().table("user_embeddings").select("user_id").execute()
+        return [row["user_id"] for row in res.data]
+    except Exception as e:
+        print(f"DB get_all_users error: {e}")
+        return []
+
+def delete_user_embedding(user_id: str):
+    """Удалить пользователя из БД."""
+    try:
+        db().table("user_embeddings").delete().eq("user_id", user_id).execute()
+        db().table("otp_secrets").delete().eq("user_id", user_id).execute()
+    except Exception as e:
+        print(f"DB delete_user error: {e}")
