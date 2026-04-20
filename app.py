@@ -302,7 +302,9 @@ async def verify_face(
 
     if result.get('verified'):
         session_id = secrets.token_urlsafe(32)
-        expires_at = time.time() + 300  # 5 минут
+        expires_at = time.time() + 300
+        create_session(session_id, user_id, expires_at, result['similarity'])
+        print(f"✓ Сессия создана: {session_id[:20]}...")  # ← добавьте эту строку
 
         # Сохраняем сессию в Supabase (переживёт перезапуск)
         create_session(session_id, user_id, expires_at, result['similarity'])
@@ -323,6 +325,7 @@ async def verify_otp(
 ):
     # Читаем сессию из Supabase
     session = get_session(session_id)
+    print(f"Ищу сессию: {session_id[:20]}... → {session}")  # ← добавьте
 
     if not session:
         raise HTTPException(400, "Сессия не найдена или истекла")
