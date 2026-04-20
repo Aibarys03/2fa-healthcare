@@ -116,9 +116,8 @@ def delete_user_embedding(user_id: str):
         print(f"DB delete_user error: {e}")
 
 def create_session(session_id: str, user_id: str, expires_at: float, similarity: float):
-    """Создать OTP-сессию в БД."""
     try:
-        db().table("otp_sessions").insert({
+        db().table("otp_sessions").upsert({   # ← было insert, стало upsert
             "session_id":      session_id,
             "user_id":         user_id,
             "expires_at":      expires_at,
