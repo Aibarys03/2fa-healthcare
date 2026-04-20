@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Загрузка данных — 2FA</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap');
+
+  :root {
+    --bg: #060912; --surface: #0d1117; --surface2: #161b27;
+    --border: #1e2a3a; --accent: #00d4ff; --accent2: #7c3aed;
+    --accent3: #10b981; --danger: #ef4444; --warning: #f59e0b;
+    --text: #e2e8f0; --muted: #64748b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Syne', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px; pointer-events: none; z-index: 0;
+  }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  header { border-bottom: 1px solid var(--border); padding: 20px 0; margin-bottom: 40px; }
+  .header-inner { display: flex; align-items: center; justify-content: space-between; }
+  .logo { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text); }
+  .logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .logo-text { font-size: 16px; font-weight: 800; }
+  .logo-text span { color: var(--accent); }
+  nav { display: flex; gap: 4px; }
+  nav a { padding: 8px 16px; border-radius: 6px; text-decoration: none; color: var(--muted); font-size: 14px; font-weight: 600; transition: all 0.2s; font-family: 'Space Mono', monospace; }
+  nav a:hover, nav a.active { color: var(--accent); background: rgba(0,212,255,0.08); }
+
+  h2 { font-size: 28px; font-weight: 800; letter-spacing: -1px; margin-bottom: 8px; }
+  .page-subtitle { color: var(--muted); font-size: 15px; margin-bottom: 36px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; }
+  .card-title { font-size: 16px; font-weight: 800; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+
+  label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; font-family: 'Space Mono', monospace; letter-spacing: 0.5px; }
+
+  input[type="text"] {
+    width: 100%; padding: 12px 16px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 15px; font-family: 'Syne', sans-serif;
+    outline: none; transition: border-color 0.2s; margin-bottom: 16px;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+
+  .dropzone {
+    border: 2px dashed var(--border); border-radius: 12px;
+    padding: 32px; text-align: center; cursor: pointer;
+    transition: all 0.2s; margin-bottom: 16px;
+    background: var(--surface2);
+  }
+  .dropzone:hover, .dropzone.dragover { border-color: var(--accent); background: rgba(0,212,255,0.04); }
+  .dropzone-icon { font-size: 32px; margin-bottom: 12px; }
+  .dropzone-text { font-size: 14px; color: var(--muted); }
+  .dropzone-text strong { color: var(--accent); }
+  #fileInput { display: none; }
+
+  .preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .preview-item { aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); position: relative; }
+  .preview-item img { width: 100%; height: 100%; object-fit: cover; }
+
+  .btn {
+    width: 100%; padding: 14px;
+    border: none; border-radius: 10px; cursor: pointer;
+    font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700;
+    transition: all 0.2s;
+  }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), #0099cc); color: #000; }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-danger { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); color: var(--danger); margin-top: 8px; }
+  .btn-danger:hover { background: rgba(239,68,68,0.2); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* Users list */
+  .users-section { margin-bottom: 32px; }
+  .user-item {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 20px; margin-bottom: 10px;
+  }
+  .user-name { font-weight: 700; font-size: 15px; }
+  .user-count { font-family: 'Space Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .user-badge { padding: 4px 10px; border-radius: 100px; font-size: 11px; font-family: 'Space Mono', monospace; font-weight: 700; }
+  .badge-ok { background: rgba(16,185,129,0.12); color: var(--accent3); }
+  .badge-warn { background: rgba(245,158,11,0.12); color: var(--warning); }
+  .del-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; transition: color 0.2s; padding: 4px 8px; }
+  .del-btn:hover { color: var(--danger); }
+
+  /* Train section */
+  .train-card { background: var(--surface); border: 1px solid rgba(124,58,237,0.3); border-radius: 16px; padding: 28px; margin-bottom: 32px; }
+  .train-title { font-size: 18px; font-weight: 800; margin-bottom: 16px; color: var(--accent2); }
+  .train-row { display: flex; gap: 16px; align-items: flex-end; }
+  .epoch-input { width: 120px; padding: 12px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 15px; outline: none; }
+  .epoch-input:focus { border-color: var(--accent2); }
+  .btn-train { flex: 1; padding: 14px; background: linear-gradient(135deg, var(--accent2), #5b21b6); color: white; border: none; border-radius: 10px; font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+  .btn-train:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-train:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .log-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-family: 'Space Mono', monospace; font-size: 12px; color: var(--accent3); max-height: 200px; overflow-y: auto; margin-top: 16px; white-space: pre-wrap; display: none; line-height: 1.6; }
+
+  .alert { padding: 14px 18px; border-radius: 10px; font-size: 14px; margin-top: 12px; display: none; }
+  .alert-success { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: var(--accent3); }
+  .alert-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <div class="container">
+    <div class="header-inner">
+      <a href="/" class="logo"><div class="logo-icon">🔐</div><div class="logo-text">Few<span>Shot</span>2FA</div></a>
+      <nav>
+        <a href="/">Главная</a>
+        <a href="/upload-data" class="active">Данные</a>
+        <a href="/register">Регистрация</a>
+        <a href="/verify">Верификация</a>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <h2>📂 Управление данными</h2>
+  <p class="page-subtitle">Загрузите 5–10 фото для каждого пользователя, затем обучите модель.</p>
+
+  <div class="grid">
+    <!-- Загрузка фото -->
+    <div class="card">
+      <div class="card-title">📸 Добавить пользователя</div>
+      <label>ID ПОЛЬЗОВАТЕЛЯ</label>
+      <input type="text" id="userId" placeholder="например: user_1" />
+
+      <label>ФОТОГРАФИИ (5–10 штук)</label>
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+        <div class="dropzone-icon">🖼️</div>
+        <div class="dropzone-text"><strong>Нажмите</strong> или перетащите фото сюда<br><small>JPG, PNG, JPEG • Рекомендуется 5–10 фото</small></div>
+      </div>
+      <input type="file" id="fileInput" multiple accept="image/*">
+
+      <div class="preview-grid" id="previewGrid"></div>
+      <div id="fileCount" style="font-size:13px; color:var(--muted); margin-bottom:14px;"></div>
+
+      <button class="btn btn-primary" onclick="uploadPhotos()" id="uploadBtn">Загрузить фото</button>
+      <div id="uploadAlert" class="alert"></div>
+    </div>
+
+    <!-- Справка -->
+    <div class="card">
+      <div class="card-title">💡 Рекомендации</div>
+      <div style="font-size:14px; color:var(--muted); line-height:1.8;">
+        <div style="margin-bottom:12px;">
+          <span style="color:var(--accent3); font-weight:700;">✓ Хорошие фото:</span><br>
+          • Чёткое, хорошо освещённое лицо<br>
+          • Разные углы (чуть влево/вправо)<br>
+          • Разное освещение (дневное/искусственное)<br>
+          • Нейтральное и улыбающееся выражение
+        </div>
+        <div style="margin-bottom:12px;">
+          <span style="color:var(--danger); font-weight:700;">✗ Избегать:</span><br>
+          • Размытые или тёмные снимки<br>
+          • Лицо перекрыто (маска, очки, рука)<br>
+          • Слишком много дублей одной позы
+        </div>
+        <div style="background:rgba(0,212,255,0.06); border-radius:8px; padding:12px; font-size:13px; color:var(--accent);">
+          Для исследования: <strong>5–10 фото</strong> достаточно.<br>
+          Чем разнообразнее — тем лучше обобщение модели.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Список пользователей -->
+  <div class="users-section">
+    <div class="card-title" style="margin-bottom:16px;">👥 Пользователи в датасете</div>
+    <div id="usersList">
+      {% if users_info %}
+        {% for u in users_info %}
+        <div class="user-item" id="user-{{ u.name }}">
+          <div>
+            <div class="user-name">{{ u.name }}</div>
+            <div class="user-count">{{ u.count }} фото</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span class="user-badge {{ 'badge-ok' if u.count >= 5 else 'badge-warn' }}">
+              {{ 'OK' if u.count >= 5 else 'Мало фото' }}
+            </span>
+            <button class="del-btn" onclick="deleteUser('{{ u.name }}')">🗑</button>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div style="text-align:center; padding:32px; color:var(--muted); font-size:14px;">Нет данных. Загрузите фото пользователей выше.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Обучение -->
+  <div class="train-card">
+    <div class="train-title">🚀 Обучение модели</div>
+    <p style="color:var(--muted); font-size:14px; margin-bottom:20px;">
+      После загрузки фото для всех пользователей запустите обучение. Рекомендуется 20–30 эпох.
+    </p>
+    <div class="train-row">
+      <div>
+        <label>ЭПОХИ</label>
+        <input type="number" class="epoch-input" id="epochs" value="30" min="5" max="100">
+      </div>
+      <button class="btn-train" onclick="startTraining()" id="trainBtn">⚡ Запустить обучение</button>
+    </div>
+    <div class="log-box" id="logBox"></div>
+    <div id="trainAlert" class="alert"></div>
+  </div>
+</div>
+
+<script>
+  let selectedFiles = [];
+
+  // Drag & drop
+  const dropzone = document.getElementById('dropzone');
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault(); dropzone.classList.remove('dragover');
+    handleFiles([...e.dataTransfer.files]);
+  });
+
+  document.getElementById('fileInput').addEventListener('change', e => handleFiles([...e.target.files]));
+
+  function handleFiles(files) {
+    selectedFiles = files.filter(f => f.type.startsWith('image/'));
+    const grid = document.getElementById('previewGrid');
+    grid.innerHTML = '';
+    document.getElementById('fileCount').textContent = `Выбрано: ${selectedFiles.length} фото`;
+    selectedFiles.forEach(f => {
+      const div = document.createElement('div'); div.className = 'preview-item';
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      div.appendChild(img); grid.appendChild(div);
+    });
+  }
+
+  async function uploadPhotos() {
+    const userId = document.getElementById('userId').value.trim();
+    if (!userId) return showAlert('uploadAlert', 'error', 'Введите ID пользователя');
+    if (selectedFiles.length === 0) return showAlert('uploadAlert', 'error', 'Выберите фотографии');
+
+    const btn = document.getElementById('uploadBtn');
+    btn.disabled = true; btn.textContent = 'Загружаю...';
+
+    const fd = new FormData();
+    fd.append('user_id', userId);
+    selectedFiles.forEach(f => fd.append('files', f));
+
+    try {
+      const r = await fetch('/api/upload-training-data', { method: 'POST', body: fd });
+      const data = await r.json();
+      if (data.success) {
+        showAlert('uploadAlert', 'success', `✓ Загружено ${data.saved} фото для "${userId}". Всего в папке: ${data.total_in_folder}`);
+        selectedFiles = [];
+        document.getElementById('previewGrid').innerHTML = '';
+        document.getElementById('fileCount').textContent = '';
+        document.getElementById('userId').value = '';
+        setTimeout(() => location.reload(), 1500);
+      } else {
+        showAlert('uploadAlert', 'error', 'Ошибка: ' + JSON.stringify(data.errors));
+      }
+    } catch(e) {
+      showAlert('uploadAlert', 'error', 'Ошибка сети: ' + e.message);
+    }
+    btn.disabled = false; btn.textContent = 'Загрузить фото';
+  }
+
+  async function deleteUser(userId) {
+    if (!confirm(`Удалить все данные пользователя "${userId}"?`)) return;
+    const r = await fetch(`/api/delete-user-data/${userId}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (data.success) {
+      document.getElementById(`user-${userId}`)?.remove();
+    }
+  }
+
+  async function startTraining() {
+    const epochs = document.getElementById('epochs').value;
+    const btn = document.getElementById('trainBtn');
+    const logBox = document.getElementById('logBox');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Обучение...';
+    logBox.style.display = 'block';
+    logBox.textContent = 'Запуск обучения...\n';
+    hideAlert('trainAlert');
+
+    const fd = new FormData();
+    fd.append('epochs', epochs);
+
+    try {
+      const r = await fetch('/api/train', { method: 'POST', body: fd });
+      const data = await r.json();
+      if (data.success) {
+        logBox.textContent = data.output || 'Обучение завершено!';
+        showAlert('trainAlert', 'success', '✓ Модель обучена и загружена!');
+        setTimeout(() => location.href = '/', 2000);
+      } else {
+        logBox.textContent = data.error || 'Неизвестная ошибка';
+        showAlert('trainAlert', 'error', 'Ошибка обучения. Подробности выше.');
+      }
+    } catch(e) {
+      showAlert('trainAlert', 'error', 'Ошибка: ' + e.message);
+    }
+    btn.disabled = false; btn.textContent = '⚡ Запустить обучение';
+  }
+
+  function showAlert(id, type, msg) {
+    const el = document.getElementById(id);
+    el.className = `alert alert-${type}`; el.textContent = msg; el.style.display = 'block';
+  }
+  function hideAlert(id) { document.getElementById(id).style.display = 'none'; }
+</script>
+</body>
+</html>

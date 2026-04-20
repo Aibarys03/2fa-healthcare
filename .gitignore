@@ -1,0 +1,11 @@
+.env
+models/best_model.pth
+models/embeddings.json
+models/otp_secrets.json
+data/
+__pycache__/
+*.pyc
+*.pth
+.idea/
+venv/
+.venv/

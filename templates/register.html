@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Регистрация пользователя — 2FA</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap');
+  :root { --bg:#060912; --surface:#0d1117; --surface2:#161b27; --border:#1e2a3a; --accent:#00d4ff; --accent2:#7c3aed; --accent3:#10b981; --danger:#ef4444; --text:#e2e8f0; --muted:#64748b; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Syne',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  body::before { content:''; position:fixed; inset:0; background-image:linear-gradient(rgba(0,212,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.03) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; z-index:0; }
+  .container { max-width:720px; margin:0 auto; padding:0 24px; position:relative; z-index:1; }
+  header { border-bottom:1px solid var(--border); padding:20px 0; margin-bottom:40px; }
+  .header-inner { display:flex; align-items:center; justify-content:space-between; }
+  .logo { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); }
+  .logo-icon { width:36px; height:36px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .logo-text { font-size:16px; font-weight:800; }
+  .logo-text span { color:var(--accent); }
+  nav { display:flex; gap:4px; }
+  nav a { padding:8px 16px; border-radius:6px; text-decoration:none; color:var(--muted); font-size:14px; font-weight:600; transition:all 0.2s; font-family:'Space Mono',monospace; }
+  nav a:hover, nav a.active { color:var(--accent); background:rgba(0,212,255,0.08); }
+
+  h2 { font-size:28px; font-weight:800; letter-spacing:-1px; margin-bottom:8px; }
+  .page-subtitle { color:var(--muted); font-size:15px; margin-bottom:32px; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px; margin-bottom:24px; }
+  .card-title { font-size:16px; font-weight:800; margin-bottom:20px; display:flex; align-items:center; gap:8px; }
+  label { display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:8px; font-family:'Space Mono',monospace; letter-spacing:0.5px; }
+  input[type="text"] { width:100%; padding:12px 16px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:15px; font-family:'Syne',sans-serif; outline:none; transition:border-color 0.2s; margin-bottom:16px; }
+  input[type="text"]:focus { border-color:var(--accent2); }
+
+  .dropzone { border:2px dashed var(--border); border-radius:12px; padding:28px; text-align:center; cursor:pointer; transition:all 0.2s; margin-bottom:12px; background:var(--surface2); }
+  .dropzone:hover, .dropzone.dragover { border-color:var(--accent2); background:rgba(124,58,237,0.04); }
+  .dropzone-icon { font-size:28px; margin-bottom:10px; }
+  .dropzone-text { font-size:13px; color:var(--muted); }
+  .dropzone-text strong { color:var(--accent2); }
+  #fileInput { display:none; }
+
+  .preview-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:8px; margin-bottom:12px; }
+  .preview-item { aspect-ratio:1; border-radius:8px; overflow:hidden; border:1px solid var(--border); }
+  .preview-item img { width:100%; height:100%; object-fit:cover; }
+
+  .btn { width:100%; padding:14px; border:none; border-radius:10px; cursor:pointer; font-family:'Syne',sans-serif; font-size:15px; font-weight:700; transition:all 0.2s; }
+  .btn-primary { background:linear-gradient(135deg,var(--accent2),#5b21b6); color:white; }
+  .btn-primary:hover { opacity:0.9; transform:translateY(-1px); }
+  .btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+
+  /* Success state */
+  .success-card { background:rgba(16,185,129,0.06); border:1px solid rgba(16,185,129,0.25); border-radius:16px; padding:28px; margin-bottom:24px; display:none; }
+  .success-title { color:var(--accent3); font-size:20px; font-weight:800; margin-bottom:16px; }
+  .qr-section { display:flex; align-items:flex-start; gap:24px; }
+  .qr-img { width:160px; height:160px; border-radius:12px; border:2px solid var(--accent3); }
+  .otp-info { flex:1; }
+  .otp-info p { font-size:14px; color:var(--muted); line-height:1.6; margin-bottom:12px; }
+  .secret-box { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:12px 16px; font-family:'Space Mono',monospace; font-size:13px; color:var(--accent); word-break:break-all; }
+
+  .alert { padding:14px 18px; border-radius:10px; font-size:14px; margin-top:12px; display:none; }
+  .alert-error { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:var(--danger); }
+  .alert-warn { background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); color:#f59e0b; }
+
+  .step { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); font-size:14px; }
+  .step:last-child { border-bottom:none; }
+  .step-num { width:28px; height:28px; border-radius:50%; background:rgba(124,58,237,0.15); color:var(--accent2); font-weight:800; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="container">
+    <div class="header-inner">
+      <a href="/" class="logo"><div class="logo-icon">🔐</div><div class="logo-text">Few<span>Shot</span>2FA</div></a>
+      <nav>
+        <a href="/">Главная</a><a href="/upload-data">Данные</a>
+        <a href="/register" class="active">Регистрация</a><a href="/verify">Верификация</a>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <h2>🧬 Регистрация пользователя</h2>
+  <p class="page-subtitle">Создайте биометрический профиль и настройте OTP-аутентификатор.</p>
+
+  <!-- Шаги -->
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-title">Процесс регистрации</div>
+    <div class="step"><div class="step-num">1</div><div>Введите уникальный ID пользователя</div></div>
+    <div class="step"><div class="step-num">2</div><div>Загрузите 3–10 чётких фотографий лица</div></div>
+    <div class="step"><div class="step-num">3</div><div>Нажмите «Зарегистрировать» — эмбеддинг создастся автоматически</div></div>
+    <div class="step"><div class="step-num">4</div><div>Отсканируйте QR-код в приложении Google Authenticator / Aegis</div></div>
+  </div>
+
+  <!-- Форма -->
+  <div class="card">
+    <div class="card-title">🧑‍💻 Данные пользователя</div>
+    <label>ID ПОЛЬЗОВАТЕЛЯ</label>
+    <input type="text" id="userId" placeholder="например: dr_ivanov" />
+
+    <label>ФОТОГРАФИИ ЛИЦА</label>
+    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+      <div class="dropzone-icon">📷</div>
+      <div class="dropzone-text"><strong>Нажмите</strong> или перетащите<br><small>3–10 фото с разных ракурсов</small></div>
+    </div>
+    <input type="file" id="fileInput" multiple accept="image/*">
+
+    <div class="preview-grid" id="previewGrid"></div>
+    <div id="fileCount" style="font-size:13px; color:var(--muted); margin-bottom:14px;"></div>
+
+    <button class="btn btn-primary" onclick="registerUser()" id="regBtn">🧬 Зарегистрировать</button>
+    <div id="regAlert" class="alert"></div>
+  </div>
+
+  <!-- Результат -->
+  <div class="success-card" id="successCard">
+    <div class="success-title">✓ Регистрация успешна!</div>
+    <div class="qr-section">
+      <img id="qrImg" class="qr-img" alt="QR код">
+      <div class="otp-info">
+        <p>Отсканируйте QR-код в приложении <strong>Google Authenticator</strong>, <strong>Aegis</strong> или любом TOTP-приложении.</p>
+        <p style="color:#f59e0b; font-size:13px;">⚠️ Сохраните секретный ключ — он показывается только один раз!</p>
+        <label>СЕКРЕТНЫЙ КЛЮЧ (TOTP)</label>
+        <div class="secret-box" id="secretBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let selectedFiles = [];
+
+  const dropzone = document.getElementById('dropzone');
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('dragover'); handleFiles([...e.dataTransfer.files]); });
+  document.getElementById('fileInput').addEventListener('change', e => handleFiles([...e.target.files]));
+
+  function handleFiles(files) {
+    selectedFiles = files.filter(f => f.type.startsWith('image/'));
+    const grid = document.getElementById('previewGrid');
+    grid.innerHTML = '';
+    document.getElementById('fileCount').textContent = `Выбрано: ${selectedFiles.length} фото`;
+    selectedFiles.forEach(f => {
+      const div = document.createElement('div'); div.className = 'preview-item';
+      const img = document.createElement('img'); img.src = URL.createObjectURL(f);
+      div.appendChild(img); grid.appendChild(div);
+    });
+  }
+
+  async function registerUser() {
+    const userId = document.getElementById('userId').value.trim();
+    if (!userId) return showAlert('Введите ID пользователя', 'warn');
+    if (selectedFiles.length < 1) return showAlert('Выберите хотя бы одно фото', 'warn');
+
+    const btn = document.getElementById('regBtn');
+    btn.disabled = true; btn.textContent = '⏳ Регистрирую...';
+
+    const fd = new FormData();
+    fd.append('user_id', userId);
+    selectedFiles.forEach(f => fd.append('files', f));
+
+    try {
+      const r = await fetch('/api/register', { method: 'POST', body: fd });
+      const data = await r.json();
+
+      if (data.success) {
+        document.getElementById('qrImg').src = 'data:image/png;base64,' + data.qr_code;
+        document.getElementById('secretBox').textContent = data.otp_secret;
+        document.getElementById('successCard').style.display = 'block';
+        document.getElementById('successCard').scrollIntoView({ behavior: 'smooth' });
+      } else {
+        showAlert(data.error || 'Ошибка регистрации', 'error');
+      }
+    } catch(e) {
+      showAlert('Ошибка сети: ' + e.message, 'error');
+    }
+    btn.disabled = false; btn.textContent = '🧬 Зарегистрировать';
+  }
+
+  function showAlert(msg, type='error') {
+    const el = document.getElementById('regAlert');
+    el.className = `alert alert-${type}`; el.textContent = msg; el.style.display = 'block';
+  }
+</script>
+</body>
+</html>

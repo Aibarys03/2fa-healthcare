@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Верификация — 2FA</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap');
+  :root { --bg:#060912; --surface:#0d1117; --surface2:#161b27; --border:#1e2a3a; --accent:#00d4ff; --accent2:#7c3aed; --accent3:#10b981; --danger:#ef4444; --warning:#f59e0b; --text:#e2e8f0; --muted:#64748b; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Syne',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  body::before { content:''; position:fixed; inset:0; background-image:linear-gradient(rgba(0,212,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.03) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; z-index:0; }
+  .container { max-width:640px; margin:0 auto; padding:0 24px; position:relative; z-index:1; }
+  header { border-bottom:1px solid var(--border); padding:20px 0; margin-bottom:40px; }
+  .header-inner { display:flex; align-items:center; justify-content:space-between; }
+  .logo { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); }
+  .logo-icon { width:36px; height:36px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .logo-text { font-size:16px; font-weight:800; }
+  .logo-text span { color:var(--accent); }
+  nav { display:flex; gap:4px; }
+  nav a { padding:8px 16px; border-radius:6px; text-decoration:none; color:var(--muted); font-size:14px; font-weight:600; transition:all 0.2s; font-family:'Space Mono',monospace; }
+  nav a:hover, nav a.active { color:var(--accent); background:rgba(0,212,255,0.08); }
+
+  h2 { font-size:28px; font-weight:800; letter-spacing:-1px; margin-bottom:8px; }
+  .page-subtitle { color:var(--muted); font-size:15px; margin-bottom:32px; }
+
+  /* Steps indicator */
+  .steps { display:flex; align-items:center; gap:0; margin-bottom:36px; }
+  .step-item { display:flex; align-items:center; gap:10px; flex:1; }
+  .step-circle {
+    width:36px; height:36px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:14px; flex-shrink:0;
+    border:2px solid var(--border); color:var(--muted);
+    transition:all 0.3s;
+  }
+  .step-circle.active { border-color:var(--accent); color:var(--accent); background:rgba(0,212,255,0.08); }
+  .step-circle.done { border-color:var(--accent3); color:var(--accent3); background:rgba(16,185,129,0.08); }
+  .step-label { font-size:13px; font-weight:600; color:var(--muted); transition:color 0.3s; }
+  .step-label.active { color:var(--accent); }
+  .step-label.done { color:var(--accent3); }
+  .step-line { flex:1; height:1px; background:var(--border); margin:0 12px; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px; margin-bottom:24px; }
+  label { display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:8px; font-family:'Space Mono',monospace; letter-spacing:0.5px; }
+
+  select {
+    width:100%; padding:12px 16px;
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); font-size:15px; font-family:'Syne',sans-serif;
+    outline:none; cursor:pointer; margin-bottom:16px; appearance:none;
+  }
+  select:focus { border-color:var(--accent); }
+
+  .dropzone { border:2px dashed var(--border); border-radius:12px; padding:28px; text-align:center; cursor:pointer; transition:all 0.2s; background:var(--surface2); }
+  .dropzone:hover, .dropzone.dragover { border-color:var(--accent); background:rgba(0,212,255,0.04); }
+  .dropzone-icon { font-size:28px; margin-bottom:10px; }
+  .dropzone-text { font-size:13px; color:var(--muted); }
+  .dropzone-text strong { color:var(--accent); }
+  #fileInput { display:none; }
+
+  .face-preview { width:100%; max-height:240px; border-radius:10px; object-fit:cover; margin:12px 0; display:none; border:2px solid var(--border); }
+
+  .btn { width:100%; padding:14px; border:none; border-radius:10px; cursor:pointer; font-family:'Syne',sans-serif; font-size:15px; font-weight:700; transition:all 0.2s; margin-top:16px; }
+  .btn-face { background:linear-gradient(135deg,var(--accent),#0099cc); color:#000; }
+  .btn-face:hover { opacity:0.9; transform:translateY(-1px); }
+  .btn-otp { background:linear-gradient(135deg,var(--accent2),#5b21b6); color:white; }
+  .btn-otp:hover { opacity:0.9; transform:translateY(-1px); }
+  .btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+
+  /* OTP Input */
+  .otp-input-row { display:flex; gap:10px; margin:16px 0; }
+  .otp-digit {
+    flex:1; height:60px; text-align:center;
+    background:var(--surface2); border:2px solid var(--border); border-radius:10px;
+    color:var(--text); font-size:24px; font-family:'Space Mono',monospace; font-weight:700;
+    outline:none; transition:border-color 0.2s;
+  }
+  .otp-digit:focus { border-color:var(--accent2); }
+
+  /* Result panels */
+  .face-result { padding:16px; border-radius:10px; display:flex; align-items:center; gap:14px; margin-top:16px; display:none; }
+  .face-result.success { background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); }
+  .face-result.fail { background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); }
+  .result-icon { font-size:28px; flex-shrink:0; }
+  .result-title { font-size:16px; font-weight:800; }
+  .result-sub { font-size:13px; color:var(--muted); margin-top:4px; font-family:'Space Mono',monospace; }
+
+  /* Similarity bar */
+  .sim-bar-wrap { margin-top:10px; }
+  .sim-bar-label { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); font-family:'Space Mono',monospace; margin-bottom:5px; }
+  .sim-bar-bg { background:var(--surface2); border-radius:100px; height:8px; overflow:hidden; }
+  .sim-bar-fill { height:100%; border-radius:100px; transition:width 0.8s ease; }
+
+  /* Auth success */
+  .auth-success {
+    background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(0,212,255,0.08));
+    border:1px solid rgba(16,185,129,0.3);
+    border-radius:16px; padding:36px; text-align:center;
+    margin-bottom:24px; display:none;
+  }
+  .auth-success-icon { font-size:56px; margin-bottom:16px; }
+  .auth-success-title { font-size:28px; font-weight:800; color:var(--accent3); letter-spacing:-1px; margin-bottom:8px; }
+  .auth-success-user { font-family:'Space Mono',monospace; font-size:14px; color:var(--muted); margin-bottom:20px; }
+  .auth-meta { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px; }
+  .auth-meta-item { background:rgba(0,0,0,0.3); border-radius:8px; padding:12px; }
+  .auth-meta-label { font-size:10px; color:var(--muted); font-family:'Space Mono',monospace; letter-spacing:1px; margin-bottom:4px; }
+  .auth-meta-value { font-size:16px; font-weight:800; color:var(--text); }
+
+  .section-hidden { display:none; }
+  .attempts-badge { display:inline-block; padding:4px 10px; background:rgba(245,158,11,0.12); border-radius:100px; font-size:12px; color:var(--warning); font-family:'Space Mono',monospace; margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="container">
+    <div class="header-inner">
+      <a href="/" class="logo"><div class="logo-icon">🔐</div><div class="logo-text">Few<span>Shot</span>2FA</div></a>
+      <nav>
+        <a href="/">Главная</a><a href="/upload-data">Данные</a>
+        <a href="/register">Регистрация</a><a href="/verify" class="active">Верификация</a>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <h2>🛡️ Двухфакторная верификация</h2>
+  <p class="page-subtitle">Шаг 1: распознавание лица. Шаг 2: одноразовый пароль.</p>
+
+  <!-- Stepper -->
+  <div class="steps">
+    <div class="step-item">
+      <div class="step-circle active" id="step1circle">1</div>
+      <div class="step-label active" id="step1label">Лицо</div>
+    </div>
+    <div class="step-line"></div>
+    <div class="step-item">
+      <div class="step-circle" id="step2circle">2</div>
+      <div class="step-label" id="step2label">OTP-код</div>
+    </div>
+    <div class="step-line"></div>
+    <div class="step-item">
+      <div class="step-circle" id="step3circle">✓</div>
+      <div class="step-label" id="step3label">Готово</div>
+    </div>
+  </div>
+
+  <!-- Step 1: Face -->
+  <div id="faceSection" class="card">
+    <div style="font-size:16px; font-weight:800; margin-bottom:20px;">📸 Шаг 1 — Верификация лица</div>
+
+    <label>ПОЛЬЗОВАТЕЛЬ</label>
+    <select id="userId">
+      <option value="">Выберите пользователя...</option>
+      {% for u in registered_users %}
+      <option value="{{ u }}">{{ u }}</option>
+      {% endfor %}
+    </select>
+
+    <label>ФОТО ДЛЯ ВЕРИФИКАЦИИ</label>
+    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+      <div class="dropzone-icon">🤳</div>
+      <div class="dropzone-text"><strong>Загрузите</strong> фото лица<br><small>Один снимок для верификации</small></div>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+    <img id="facePreview" class="face-preview" alt="Предпросмотр">
+
+    <button class="btn btn-face" onclick="verifyFace()" id="faceBtn">🔍 Верифицировать лицо</button>
+
+    <div id="faceResult" class="face-result">
+      <div class="result-icon" id="resultIcon"></div>
+      <div>
+        <div class="result-title" id="resultTitle"></div>
+        <div class="result-sub" id="resultSub"></div>
+        <div class="sim-bar-wrap" id="simBarWrap">
+          <div class="sim-bar-label">
+            <span>Сходство</span><span id="simValue"></span>
+          </div>
+          <div class="sim-bar-bg">
+            <div class="sim-bar-fill" id="simBar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: OTP -->
+  <div id="otpSection" class="card section-hidden">
+    <div style="font-size:16px; font-weight:800; margin-bottom:6px;">🔑 Шаг 2 — OTP-код</div>
+    <p style="color:var(--muted); font-size:14px; margin-bottom:20px;">Введите 6-значный код из вашего аутентификатора (Google Authenticator / Aegis).</p>
+
+    <div class="otp-input-row" id="otpInputs">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+    </div>
+    <div id="attemptsInfo" class="attempts-badge" style="display:none;"></div>
+
+    <button class="btn btn-otp" onclick="verifyOTP()" id="otpBtn">✓ Подтвердить OTP</button>
+  </div>
+
+  <!-- Success -->
+  <div class="auth-success" id="authSuccess">
+    <div class="auth-success-icon">🎉</div>
+    <div class="auth-success-title">Аутентификация успешна!</div>
+    <div class="auth-success-user" id="successUser"></div>
+    <div class="auth-meta">
+      <div class="auth-meta-item">
+        <div class="auth-meta-label">СХОДСТВО ЛИЦА</div>
+        <div class="auth-meta-value" id="metaSim">—</div>
+      </div>
+      <div class="auth-meta-item">
+        <div class="auth-meta-label">OTP</div>
+        <div class="auth-meta-value" style="color:var(--accent3);">✓ Верен</div>
+      </div>
+    </div>
+    <button class="btn" style="background:var(--surface2); color:var(--text); margin-top:20px;" onclick="reset()">🔄 Новая сессия</button>
+  </div>
+</div>
+
+<script>
+  let sessionId = null;
+  let faceSimlarity = 0;
+  let selectedFile = null;
+
+  // File handling
+  const dropzone = document.getElementById('dropzone');
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
+  document.getElementById('fileInput').addEventListener('change', e => handleFile(e.target.files[0]));
+
+  function handleFile(f) {
+    if (!f || !f.type.startsWith('image/')) return;
+    selectedFile = f;
+    const preview = document.getElementById('facePreview');
+    preview.src = URL.createObjectURL(f);
+    preview.style.display = 'block';
+    document.getElementById('faceResult').style.display = 'none';
+  }
+
+  async function verifyFace() {
+    const userId = document.getElementById('userId').value;
+    if (!userId) return alert('Выберите пользователя');
+    if (!selectedFile) return alert('Загрузите фото');
+
+    const btn = document.getElementById('faceBtn');
+    btn.disabled = true; btn.textContent = '⏳ Анализирую...';
+
+    const fd = new FormData();
+    fd.append('user_id', userId);
+    fd.append('file', selectedFile);
+
+    try {
+      const r = await fetch('/api/verify-face', { method:'POST', body:fd });
+      const data = await r.json();
+
+      const resultDiv = document.getElementById('faceResult');
+      resultDiv.style.display = 'flex';
+
+      const sim = data.similarity || 0;
+      const pct = Math.round(sim * 100);
+      faceSimlarity = sim;
+
+      document.getElementById('simValue').textContent = sim.toFixed(4);
+      document.getElementById('simBar').style.width = pct + '%';
+      document.getElementById('simBar').style.background = sim >= (data.threshold || 0.7)
+        ? 'linear-gradient(90deg,#10b981,#00d4ff)' : 'linear-gradient(90deg,#ef4444,#f59e0b)';
+
+      if (data.verified) {
+        sessionId = data.session_id;
+        resultDiv.className = 'face-result success';
+        document.getElementById('resultIcon').textContent = '✅';
+        document.getElementById('resultTitle').textContent = 'Лицо распознано!';
+        document.getElementById('resultSub').textContent = `Сходство: ${sim.toFixed(4)} ≥ порог ${data.threshold}`;
+
+        // Переход ко шагу 2
+        setTimeout(() => {
+          setStep(2);
+          document.getElementById('faceSection').style.opacity = '0.5';
+          document.getElementById('faceSection').style.pointerEvents = 'none';
+          document.getElementById('otpSection').classList.remove('section-hidden');
+          document.getElementById('otpSection').scrollIntoView({behavior:'smooth'});
+          document.querySelectorAll('.otp-digit')[0].focus();
+        }, 800);
+      } else {
+        resultDiv.className = 'face-result fail';
+        document.getElementById('resultIcon').textContent = '❌';
+        document.getElementById('resultTitle').textContent = 'Верификация не пройдена';
+        document.getElementById('resultSub').textContent = data.error || `Сходство: ${sim.toFixed(4)} < порог ${data.threshold}`;
+      }
+    } catch(e) {
+      alert('Ошибка: ' + e.message);
+    }
+    btn.disabled = false; btn.textContent = '🔍 Верифицировать лицо';
+  }
+
+  // OTP digit navigation
+  document.querySelectorAll('.otp-digit').forEach((input, idx, all) => {
+    input.addEventListener('keyup', e => {
+      if (e.key >= '0' && e.key <= '9' && idx < all.length - 1) all[idx + 1].focus();
+      if (e.key === 'Backspace' && idx > 0) all[idx - 1].focus();
+      if (e.key === 'Enter') verifyOTP();
+    });
+    input.addEventListener('input', () => {
+      input.value = input.value.replace(/\D/g,'').slice(-1);
+    });
+  });
+
+  async function verifyOTP() {
+    const digits = [...document.querySelectorAll('.otp-digit')].map(i => i.value);
+    const code = digits.join('');
+    if (code.length !== 6) return alert('Введите 6 цифр');
+
+    const btn = document.getElementById('otpBtn');
+    btn.disabled = true; btn.textContent = '⏳ Проверяю...';
+
+    const fd = new FormData();
+    fd.append('session_id', sessionId);
+    fd.append('otp_code', code);
+
+    try {
+      const r = await fetch('/api/verify-otp', { method:'POST', body:fd });
+      const data = await r.json();
+
+      if (data.authenticated) {
+        setStep(3);
+        document.getElementById('otpSection').style.display = 'none';
+        document.getElementById('faceSection').style.display = 'none';
+
+        const successDiv = document.getElementById('authSuccess');
+        successDiv.style.display = 'block';
+        document.getElementById('successUser').textContent = `Пользователь: ${data.user_id}`;
+        document.getElementById('metaSim').textContent = faceSimlarity.toFixed(4);
+        successDiv.scrollIntoView({behavior:'smooth'});
+      } else {
+        const info = document.getElementById('attemptsInfo');
+        if (data.attempts_left !== undefined) {
+          info.style.display = 'inline-block';
+          info.textContent = `Неверный код. Осталось попыток: ${data.attempts_left}`;
+        }
+        if (data.attempts_left === 0 || data.error) {
+          alert(data.error || 'Все попытки исчерпаны. Начните заново.');
+          reset();
+        }
+        document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+        document.querySelectorAll('.otp-digit')[0].focus();
+      }
+    } catch(e) {
+      alert('Ошибка: ' + e.message);
+    }
+    btn.disabled = false; btn.textContent = '✓ Подтвердить OTP';
+  }
+
+  function setStep(n) {
+    ['step1', 'step2', 'step3'].forEach((id, i) => {
+      const circle = document.getElementById(id + 'circle');
+      const label = document.getElementById(id + 'label');
+      circle.className = 'step-circle' + (i + 1 < n ? ' done' : i + 1 === n ? ' active' : '');
+      label.className = 'step-label' + (i + 1 < n ? ' done' : i + 1 === n ? ' active' : '');
+    });
+  }
+
+  function reset() {
+    location.reload();
+  }
+</script>
+</body>
+</html>
