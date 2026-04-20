@@ -114,3 +114,48 @@ def delete_user_embedding(user_id: str):
         db().table("otp_secrets").delete().eq("user_id", user_id).execute()
     except Exception as e:
         print(f"DB delete_user error: {e}")
+
+def create_session(session_id: str, user_id: str, expires_at: float, similarity: float):
+    """Создать OTP-сессию в БД."""
+    try:
+        db().table("otp_sessions").insert({
+            "session_id":      session_id,
+            "user_id":         user_id,
+            "expires_at":      expires_at,
+            "attempts":        0,
+            "face_similarity": similarity
+        }).execute()
+    except Exception as e:
+        print(f"DB create_session error: {e}")
+
+def get_session(session_id: str):
+    """Получить сессию из БД."""
+    try:
+        res = db().table("otp_sessions") \
+            .select("*") \
+            .eq("session_id", session_id) \
+            .execute()
+        return res.data[0] if res.data else None
+    except Exception as e:
+        print(f"DB get_session error: {e}")
+        return None
+
+def update_session_attempts(session_id: str, attempts: int):
+    """Обновить счётчик попыток."""
+    try:
+        db().table("otp_sessions") \
+            .update({"attempts": attempts}) \
+            .eq("session_id", session_id) \
+            .execute()
+    except Exception as e:
+        print(f"DB update_session error: {e}")
+
+def delete_session(session_id: str):
+    """Удалить сессию после использования."""
+    try:
+        db().table("otp_sessions") \
+            .delete() \
+            .eq("session_id", session_id) \
+            .execute()
+    except Exception as e:
+        print(f"DB delete_session error: {e}")

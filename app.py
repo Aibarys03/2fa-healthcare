@@ -22,7 +22,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from verifier import FaceVerifier
-
+from database import (get_otp_secret, save_otp_secret, log_auth,
+                       download_model_if_needed,
+                       create_session, get_session,
+                       update_session_attempts, delete_session)
 # ─── Инициализация ──────────────────────────────────────────────────────────
 
 app = FastAPI(title="2FA Face + OTP System", version="1.0.0")
@@ -55,7 +58,6 @@ load_verifier()
 # ─── OTP сессии ─────────────────────────────────────────────────────────────
 
 # Временное хранилище OTP сессий (в production - Redis/DB)
-otp_sessions: dict = {}    # {session_id: {user_id, secret, expires_at, attempts}}
 otp_secrets: dict = {}     # {user_id: totp_secret}
 
 OTP_SECRETS_FILE = 'models/otp_secrets.json'
@@ -291,28 +293,25 @@ async def verify_face(
     user_id: str = Form(...),
     file: UploadFile = File(...)
 ):
-    """Шаг 1: Верификация лица. При успехе создаёт OTP-сессию."""
     if not verifier:
         raise HTTPException(400, "Модель не загружена")
 
     content = await file.read()
     probe_image = image_from_upload(content)
-
     result = verifier.verify(user_id, probe_image)
 
     if result.get('verified'):
-        # Создаём временную сессию для OTP
         session_id = secrets.token_urlsafe(32)
-        otp_sessions[session_id] = {
-            'user_id': user_id,
-            'expires_at': time.time() + 300,  # 5 минут
-            'attempts': 0,
-            'face_similarity': result['similarity']
-        }
+        expires_at = time.time() + 300  # 5 минут
+
+        # Сохраняем сессию в Supabase (переживёт перезапуск)
+        create_session(session_id, user_id, expires_at, result['similarity'])
+
         result['session_id'] = session_id
         result['message'] = 'Лицо верифицировано! Введите OTP.'
     else:
-        result['message'] = f'Верификация не пройдена (сходство: {result["similarity"]:.3f} < {result["threshold"]})'
+        log_auth(user_id, result['similarity'], False, False, False)
+        result['message'] = f'Верификация не пройдена (сходство: {result["similarity"]:.3f})'
 
     return result
 
@@ -322,39 +321,38 @@ async def verify_otp(
     session_id: str = Form(...),
     otp_code: str = Form(...)
 ):
-    """Шаг 2: Верификация OTP-кода. Завершает 2FA."""
-    session = otp_sessions.get(session_id)
+    # Читаем сессию из Supabase
+    session = get_session(session_id)
 
     if not session:
         raise HTTPException(400, "Сессия не найдена или истекла")
 
     if time.time() > session['expires_at']:
-        del otp_sessions[session_id]
+        delete_session(session_id)
         raise HTTPException(400, "Сессия истекла. Начните заново.")
 
     if session['attempts'] >= 3:
-        del otp_sessions[session_id]
+        delete_session(session_id)
         return {
             'authenticated': False,
             'error': 'Превышено число попыток (3). Начните заново.'
         }
 
     user_id = session['user_id']
-    secret = otp_secrets.get(user_id)
+    secret = get_otp_secret(user_id)
 
     if not secret:
-        raise HTTPException(400, f"OTP не настроен для пользователя {user_id}")
+        raise HTTPException(400, f"OTP не настроен для {user_id}")
 
     totp = pyotp.TOTP(secret)
-
-    # Проверяем с окном ±1 интервал (30 сек)
     valid = totp.verify(otp_code, valid_window=1)
 
-    session['attempts'] += 1
+    new_attempts = session['attempts'] + 1
+    update_session_attempts(session_id, new_attempts)
 
     if valid:
-        del otp_sessions[session_id]
-        log_auth(user_id, session["face_similarity"], True, True, True)
+        delete_session(session_id)
+        log_auth(user_id, session['face_similarity'], True, True, True)
         return {
             'authenticated': True,
             'user_id': user_id,
@@ -363,8 +361,10 @@ async def verify_otp(
             'timestamp': datetime.now().isoformat()
         }
     else:
-        attempts_left = 3 - session['attempts']
-        log_auth(user_id, session["face_similarity"], True, False, False)
+        attempts_left = 3 - new_attempts
+        if attempts_left <= 0:
+            delete_session(session_id)
+            log_auth(user_id, session['face_similarity'], True, False, False)
         return {
             'authenticated': False,
             'attempts_left': attempts_left,
