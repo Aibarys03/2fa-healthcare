@@ -1,3 +1,4 @@
+templates/register.html:
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -62,6 +63,19 @@
   .step { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); font-size:14px; }
   .step:last-child { border-bottom:none; }
   .step-num { width:28px; height:28px; border-radius:50%; background:rgba(124,58,237,0.15); color:var(--accent2); font-weight:800; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; }
+
+  .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);}
+  .hamburger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
+  nav a.admin-link{color:var(--warning);}
+  nav a.admin-link:hover{color:var(--warning);background:rgba(245,158,11,0.1);}
+  @media(max-width:640px){
+    .hamburger{display:flex;}
+    nav{display:none;width:100%;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;margin-top:8px;}
+    nav.open{display:flex;}
+    nav a{padding:10px 14px;}
+    .header-inner{flex-wrap:wrap;}
+  }
+
 </style>
 </head>
 <body>
@@ -69,9 +83,14 @@
   <div class="container">
     <div class="header-inner">
       <a href="/" class="logo"><div class="logo-icon">🔐</div><div class="logo-text">Few<span>Shot</span>2FA</div></a>
-      <nav>
-        <a href="/">Главная</a><a href="/upload-data">Данные</a>
-        <a href="/register" class="active">Регистрация</a><a href="/verify">Верификация</a>
+            <div class="hamburger" onclick="document.getElementById('mainNav').classList.toggle('open')">
+        <span></span><span></span><span></span>
+      </div>
+      <nav id="mainNav">
+        <a href="/">Главная</a>
+        <a href="/register" class="active">Регистрация</a>
+        <a href="/verify">Верификация</a>
+        <a href="/admin" class="admin-link">⚙ Админ</a>
       </nav>
     </div>
   </div>
@@ -183,3 +202,4 @@
 </script>
 </body>
 </html>
+

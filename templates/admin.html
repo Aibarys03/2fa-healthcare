@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Админ — 2FA Healthcare</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap');
+  :root{--bg:#060912;--surface:#0d1117;--surface2:#161b27;--border:#1e2a3a;--accent:#00d4ff;--accent2:#7c3aed;--accent3:#10b981;--danger:#ef4444;--warning:#f59e0b;--text:#e2e8f0;--muted:#64748b;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+  .container{max-width:1000px;margin:0 auto;padding:0 16px;position:relative;z-index:1;}
+
+  /* HEADER */
+  header{border-bottom:1px solid var(--border);padding:16px 0;margin-bottom:32px;}
+  .header-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);}
+  .logo-icon{width:34px;height:34px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
+  .logo-text{font-size:15px;font-weight:800;} .logo-text span{color:var(--accent);}
+  nav{display:flex;gap:4px;flex-wrap:wrap;}
+  nav a{padding:7px 13px;border-radius:6px;text-decoration:none;color:var(--muted);font-size:13px;font-weight:600;transition:all 0.2s;font-family:'Space Mono',monospace;white-space:nowrap;}
+  nav a:hover,nav a.active{color:var(--accent);background:rgba(0,212,255,0.08);}
+  nav a.admin-link{color:var(--warning);}
+  nav a.admin-link:hover,nav a.admin-link.active{color:var(--warning);background:rgba(245,158,11,0.1);}
+
+  /* HAMBURGER */
+  .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);}
+  .hamburger span{width:20px;height:2px;background:var(--text);border-radius:2px;transition:all 0.3s;}
+  @media(max-width:640px){
+    .hamburger{display:flex;}
+    nav{display:none;width:100%;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;margin-top:8px;}
+    nav.open{display:flex;}
+    nav a{padding:10px 14px;border-radius:6px;}
+  }
+
+  h2{font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:6px;}
+  @media(max-width:480px){h2{font-size:20px;}}
+  .page-subtitle{color:var(--muted);font-size:14px;margin-bottom:24px;}
+
+  /* ADMIN BADGE */
+  .admin-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;color:var(--warning);font-family:'Space Mono',monospace;margin-bottom:20px;}
+
+  /* TABS */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:24px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .tabs::-webkit-scrollbar{display:none;}
+  .tab{padding:10px 18px;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;font-family:'Space Mono',monospace;transition:all 0.2s;}
+  .tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+  .tab-content{display:none;} .tab-content.active{display:block;}
+
+  /* CARDS */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:16px;}
+  .card-title{font-size:15px;font-weight:800;margin-bottom:14px;}
+
+  /* USER TABLE */
+  .users-table{width:100%;border-collapse:collapse;}
+  .users-table th{font-size:11px;font-weight:700;color:var(--muted);font-family:'Space Mono',monospace;text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  .users-table td{padding:10px;border-bottom:1px solid rgba(30,42,58,0.6);font-size:14px;vertical-align:middle;}
+  .users-table tr:last-child td{border-bottom:none;}
+  .users-table tr:hover td{background:rgba(255,255,255,0.02);}
+  .user-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--accent2),var(--accent));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:white;flex-shrink:0;}
+  .user-info{display:flex;align-items:center;gap:10px;}
+  .user-name{font-weight:700;font-size:14px;}
+  .user-meta{font-size:11px;color:var(--muted);font-family:'Space Mono',monospace;margin-top:2px;}
+  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;font-family:'Space Mono',monospace;}
+  .badge-green{background:rgba(16,185,129,0.12);color:var(--accent3);}
+  .badge-red{background:rgba(239,68,68,0.12);color:var(--danger);}
+  .badge-blue{background:rgba(0,212,255,0.1);color:var(--accent);}
+
+  /* Responsive table */
+  @media(max-width:600px){
+    .users-table thead{display:none;}
+    .users-table tr{display:flex;flex-direction:column;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:var(--surface);}
+    .users-table td{padding:4px 0;border:none;font-size:13px;}
+    .users-table td:first-child{order:-1;}
+  }
+
+  /* ACTION BUTTONS */
+  .btn-sm{padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:none;font-family:'Syne',monospace;transition:all 0.2s;}
+  .btn-danger{background:rgba(239,68,68,0.12);color:var(--danger);border:1px solid rgba(239,68,68,0.25);}
+  .btn-danger:hover{background:rgba(239,68,68,0.25);}
+  .btn-info{background:rgba(0,212,255,0.1);color:var(--accent);border:1px solid rgba(0,212,255,0.2);}
+  .btn-info:hover{background:rgba(0,212,255,0.2);}
+  .btn-actions{display:flex;gap:6px;flex-wrap:wrap;}
+
+  /* STATS ROW */
+  .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;}
+  @media(max-width:600px){.stats-row{grid-template-columns:repeat(2,1fr);}}
+  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;}
+  .stat-label{font-size:10px;font-weight:700;color:var(--muted);font-family:'Space Mono',monospace;letter-spacing:0.5px;margin-bottom:6px;}
+  .stat-value{font-size:24px;font-weight:800;color:var(--text);}
+  .stat-value.green{color:var(--accent3);}
+  .stat-value.blue{color:var(--accent);}
+  .stat-value.yellow{color:var(--warning);}
+  .stat-value.red{color:var(--danger);}
+
+  /* TRAIN SECTION */
+  .train-card{background:var(--surface);border:1px solid rgba(124,58,237,0.3);border-radius:14px;padding:20px;margin-bottom:16px;}
+  .train-title{font-size:16px;font-weight:800;color:var(--accent2);margin-bottom:12px;}
+  .train-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;}
+  label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;font-family:'Space Mono',monospace;letter-spacing:0.5px;}
+  .epoch-input{width:90px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:'Syne',sans-serif;outline:none;}
+  .epoch-input:focus{border-color:var(--accent2);}
+  .btn-train{flex:1;min-width:160px;padding:12px 16px;background:linear-gradient(135deg,var(--accent2),#5b21b6);color:white;border:none;border-radius:10px;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s;}
+  .btn-train:hover{opacity:0.9;transform:translateY(-1px);}
+  .btn-train:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+  .log-box{display:none;margin-top:14px;padding:14px;background:#0a0d16;border:1px solid var(--border);border-radius:8px;font-family:'Space Mono',monospace;font-size:12px;color:var(--accent3);max-height:200px;overflow-y:auto;white-space:pre-wrap;}
+
+  /* LOGS TABLE */
+  .logs-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .logs-table{width:100%;border-collapse:collapse;min-width:500px;}
+  .logs-table th{font-size:11px;font-weight:700;color:var(--muted);font-family:'Space Mono',monospace;text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  .logs-table td{padding:8px 10px;border-bottom:1px solid rgba(30,42,58,0.6);font-size:13px;font-family:'Space Mono',monospace;}
+  .logs-table tr:last-child td{border-bottom:none;}
+  .sim-bar-mini{width:60px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle;margin-left:6px;}
+  .sim-fill{height:100%;border-radius:3px;}
+
+  /* ALERT */
+  .alert{padding:12px 14px;border-radius:8px;font-size:13px;margin-top:12px;display:none;}
+  .alert-success{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:var(--accent3);}
+  .alert-error{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:var(--danger);}
+
+  /* MODAL */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:100;display:none;align-items:center;justify-content:center;padding:16px;}
+  .modal-overlay.open{display:flex;}
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:420px;}
+  .modal-title{font-size:18px;font-weight:800;margin-bottom:8px;}
+  .modal-sub{font-size:13px;color:var(--muted);margin-bottom:20px;}
+  .modal-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;}
+  .btn-cancel{flex:1;padding:11px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:'Syne',sans-serif;font-weight:700;cursor:pointer;font-size:14px;}
+  .btn-confirm-del{flex:1;padding:11px;background:var(--danger);border:none;border-radius:8px;color:white;font-family:'Syne',sans-serif;font-weight:700;cursor:pointer;font-size:14px;}
+  .btn-confirm-del:hover{opacity:0.85;}
+
+  /* EMPTY STATE */
+  .empty{text-align:center;padding:40px 20px;color:var(--muted);}
+  .empty-icon{font-size:40px;margin-bottom:12px;}
+  .empty-text{font-size:14px;}
+
+  /* PASSWORD GATE */
+  .pw-gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .pw-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;width:100%;max-width:380px;text-align:center;}
+  .pw-icon{font-size:48px;margin-bottom:16px;}
+  .pw-title{font-size:22px;font-weight:800;margin-bottom:6px;}
+  .pw-sub{font-size:13px;color:var(--muted);margin-bottom:24px;}
+  .pw-input{width:100%;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px;font-family:'Space Mono',monospace;outline:none;margin-bottom:12px;text-align:center;letter-spacing:4px;}
+  .pw-input:focus{border-color:var(--warning);}
+  .btn-pw{width:100%;padding:12px;background:linear-gradient(135deg,var(--warning),#d97706);border:none;border-radius:8px;color:#000;font-family:'Syne',sans-serif;font-size:15px;font-weight:800;cursor:pointer;}
+  .btn-pw:hover{opacity:0.9;}
+  .pw-error{color:var(--danger);font-size:13px;margin-top:8px;display:none;}
+</style>
+</head>
+<body>
+
+<!-- PASSWORD GATE -->
+<div id="pwGate" class="pw-gate">
+  <div class="pw-box">
+    <div class="pw-icon">🔒</div>
+    <div class="pw-title">Панель администратора</div>
+    <div class="pw-sub">Введите пароль для доступа</div>
+    <input type="password" class="pw-input" id="pwInput" placeholder="••••••" onkeydown="if(event.key==='Enter')checkPw()">
+    <button class="btn-pw" onclick="checkPw()">Войти</button>
+    <div class="pw-error" id="pwError">Неверный пароль</div>
+  </div>
+</div>
+
+<!-- ADMIN PANEL (скрыт до ввода пароля) -->
+<div id="adminPanel" style="display:none;">
+
+<header>
+  <div class="container">
+    <div class="header-inner">
+      <a href="/" class="logo">
+        <div class="logo-icon">🔐</div>
+        <div class="logo-text">Few<span>Shot</span>2FA</div>
+      </a>
+      <div class="hamburger" onclick="toggleNav()">
+        <span></span><span></span><span></span>
+      </div>
+      <nav id="mainNav">
+        <a href="/">Главная</a>
+        <a href="/register">Регистрация</a>
+        <a href="/verify">Верификация</a>
+        <a href="/admin" class="admin-link active">⚙ Админ</a>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <div class="admin-badge">⚙ ADMIN MODE</div>
+  <h2>Панель управления</h2>
+  <p class="page-subtitle">Управление пользователями, обучение модели, логи аутентификации.</p>
+
+  <!-- STATS -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">ПОЛЬЗОВАТЕЛЕЙ</div>
+      <div class="stat-value blue" id="statUsers">{{ users|length }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">МОДЕЛЬ</div>
+      <div class="stat-value {{ 'green' if model_exists else 'red' }}">{{ 'OK' if model_exists else 'НЕТ' }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">ТОЧНОСТЬ</div>
+      <div class="stat-value green">{% if history %}{{ '%.1f'|format(history.accuracy[-1]) }}%{% else %}—{% endif %}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">ПОРОГ</div>
+      <div class="stat-value yellow">{{ threshold }}</div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('users')">👤 Пользователи</div>
+    <div class="tab" onclick="switchTab('train')">🚀 Обучение</div>
+    <div class="tab" onclick="switchTab('logs')">📋 Логи входов</div>
+  </div>
+
+  <!-- TAB: USERS -->
+  <div class="tab-content active" id="tab-users">
+    <div class="card">
+      <div class="card-title">Зарегистрированные пользователи</div>
+      {% if users %}
+      <div class="logs-wrap">
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>Пользователь</th>
+              <th>OTP</th>
+              <th>Статус</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody id="usersTbody">
+            {% for u in users %}
+            <tr id="row-{{ u.user_id }}">
+              <td>
+                <div class="user-info">
+                  <div class="user-avatar">{{ u.user_id[0]|upper }}</div>
+                  <div>
+                    <div class="user-name">{{ u.user_id }}</div>
+                    <div class="user-meta">{{ u.created_at[:10] if u.created_at else '—' }}</div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="badge {{ 'badge-green' if u.has_otp else 'badge-red' }}">{{ '✓ Настроен' if u.has_otp else '✗ Нет' }}</span></td>
+              <td><span class="badge badge-blue">Активен</span></td>
+              <td>
+                <div class="btn-actions">
+                  <button class="btn-sm btn-info" onclick="showUserStats('{{ u.user_id }}')">📊 Статистика</button>
+                  <button class="btn-sm btn-danger" onclick="confirmDelete('{{ u.user_id }}')">🗑 Удалить</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty">
+        <div class="empty-icon">👤</div>
+        <div class="empty-text">Пользователей нет. <a href="/register" style="color:var(--accent)">Зарегистрируйте</a> первого.</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- User stats panel -->
+    <div class="card" id="userStatsCard" style="display:none;">
+      <div class="card-title" id="userStatsTitle">Статистика пользователя</div>
+      <div id="userStatsContent"></div>
+    </div>
+  </div>
+
+  <!-- TAB: TRAIN -->
+  <div class="tab-content" id="tab-train">
+    <div class="train-card">
+      <div class="train-title">🚀 Обучение модели</div>
+      <p style="color:var(--muted);font-size:14px;margin-bottom:16px;">
+        Запустите переобучение после добавления новых пользователей. Рекомендуется 20–30 эпох.
+      </p>
+      <div class="train-row">
+        <div>
+          <label>ЭПОХИ</label>
+          <input type="number" class="epoch-input" id="epochs" value="30" min="5" max="100">
+        </div>
+        <button class="btn-train" onclick="startTraining()" id="trainBtn">⚡ Запустить обучение</button>
+      </div>
+      <div class="log-box" id="logBox"></div>
+      <div class="alert" id="trainAlert"></div>
+    </div>
+
+    {% if history %}
+    <div class="card">
+      <div class="card-title">📈 Последние результаты обучения</div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px;">
+        <div class="stat-card">
+          <div class="stat-label">ФИНАЛЬНАЯ ТОЧНОСТЬ</div>
+          <div class="stat-value green">{{ '%.1f'|format(history.accuracy[-1]) }}%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">ФИНАЛЬНЫЙ LOSS</div>
+          <div class="stat-value blue">{{ '%.4f'|format(history.loss[-1]) }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">МАХ ТОЧНОСТЬ</div>
+          <div class="stat-value green">{{ '%.1f'|format(history.accuracy|max) }}%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">ЭПОХ ОБУЧЕНО</div>
+          <div class="stat-value yellow">{{ history.loss|length }}</div>
+        </div>
+      </div>
+      <img src="/static/training_plot.png" style="width:100%;border-radius:8px;border:1px solid var(--border);" onerror="this.style.display='none'" alt="Training plot">
+    </div>
+    {% endif %}
+
+    <!-- Upload data section -->
+    <div class="card">
+      <div class="card-title">📁 Загрузка обучающих данных</div>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Добавьте 5–10 фото для нового пользователя перед обучением.</p>
+      <label>ID ПОЛЬЗОВАТЕЛЯ</label>
+      <input type="text" id="trainUserId" placeholder="например: ivan_petrov"
+        style="width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:'Syne',sans-serif;outline:none;margin-bottom:14px;">
+      <div id="trainDropzone" style="border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;background:var(--surface2);"
+           onclick="document.getElementById('trainFiles').click()">
+        <div style="font-size:24px;margin-bottom:8px;">📸</div>
+        <div style="font-size:13px;color:var(--muted);">Нажмите или перетащите фото</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;" id="trainFileCount"></div>
+      </div>
+      <input type="file" id="trainFiles" accept="image/*" multiple style="display:none">
+      <button onclick="uploadTrainData()" style="width:100%;margin-top:12px;padding:11px;background:var(--accent3);border:none;border-radius:8px;color:#000;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;cursor:pointer;">
+        Загрузить фото
+      </button>
+      <div class="alert" id="uploadAlert"></div>
+    </div>
+  </div>
+
+  <!-- TAB: LOGS -->
+  <div class="tab-content" id="tab-logs">
+    <div class="card">
+      <div class="card-title">Последние попытки аутентификации</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+        <button class="btn-sm btn-info" onclick="loadLogs('all')">Все</button>
+        <button class="btn-sm" style="background:rgba(16,185,129,0.1);color:var(--accent3);border:1px solid rgba(16,185,129,0.2);" onclick="loadLogs('success')">✓ Успешные</button>
+        <button class="btn-sm btn-danger" onclick="loadLogs('fail')">✗ Неудачные</button>
+      </div>
+      <div class="logs-wrap">
+        <table class="logs-table" id="logsTable">
+          <thead>
+            <tr>
+              <th>Время</th>
+              <th>Пользователь</th>
+              <th>Лицо</th>
+              <th>OTP</th>
+              <th>Сходство</th>
+              <th>Итог</th>
+            </tr>
+          </thead>
+          <tbody id="logsTbody">
+            <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">Загрузка...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+</div><!-- /adminPanel -->
+
+<!-- DELETE MODAL -->
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal">
+    <div class="modal-title">🗑 Удалить пользователя?</div>
+    <div class="modal-sub" id="deleteModalSub">Это действие нельзя отменить. Будут удалены эмбеддинг лица и OTP-секрет.</div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Отмена</button>
+      <button class="btn-confirm-del" onclick="deleteUser()">Удалить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── PASSWORD GATE ────────────────────────────────────────────
+const ADMIN_PASSWORD = 'admin2025';  // ← поменяйте на свой пароль
+
+function checkPw() {
+  const val = document.getElementById('pwInput').value;
+  if (val === ADMIN_PASSWORD) {
+    document.getElementById('pwGate').style.display = 'none';
+    document.getElementById('adminPanel').style.display = 'block';
+    sessionStorage.setItem('adminAuth', '1');
+    loadLogs('all');
+  } else {
+    document.getElementById('pwError').style.display = 'block';
+    document.getElementById('pwInput').value = '';
+  }
+}
+
+// Auto-login if already authenticated this session
+if (sessionStorage.getItem('adminAuth') === '1') {
+  document.getElementById('pwGate').style.display = 'none';
+  document.getElementById('adminPanel').style.display = 'block';
+}
+
+// ── NAV ──────────────────────────────────────────────────────
+function toggleNav() {
+  document.getElementById('mainNav').classList.toggle('open');
+}
+
+// ── TABS ─────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['users','train','logs'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'logs') loadLogs('all');
+}
+
+// ── DELETE USER ──────────────────────────────────────────────
+let pendingDeleteId = null;
+
+function confirmDelete(userId) {
+  pendingDeleteId = userId;
+  document.getElementById('deleteModalSub').textContent =
+    `Удалить пользователя "${userId}"? Это нельзя отменить.`;
+  document.getElementById('deleteModal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('deleteModal').classList.remove('open');
+  pendingDeleteId = null;
+}
+
+async function deleteUser() {
+  if (!pendingDeleteId) return;
+  const userId = pendingDeleteId;
+  closeModal();
+
+  try {
+    const r = await fetch(`/api/admin/delete-user/${userId}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (data.success) {
+      document.getElementById('row-' + userId)?.remove();
+      const count = document.getElementById('statUsers');
+      count.textContent = parseInt(count.textContent) - 1;
+    }
+  } catch(e) { alert('Ошибка: ' + e.message); }
+}
+
+// ── USER STATS ───────────────────────────────────────────────
+async function showUserStats(userId) {
+  const card = document.getElementById('userStatsCard');
+  const title = document.getElementById('userStatsTitle');
+  const content = document.getElementById('userStatsContent');
+  title.textContent = `Статистика: ${userId}`;
+  content.innerHTML = '<p style="color:var(--muted);font-size:13px;">Загрузка...</p>';
+  card.style.display = 'block';
+  card.scrollIntoView({behavior:'smooth'});
+
+  try {
+    const r = await fetch(`/api/admin/user-stats/${userId}`);
+    const data = await r.json();
+    const total = data.total || 0;
+    const success = data.success_count || 0;
+    const rate = total > 0 ? ((success/total)*100).toFixed(1) : '—';
+    const avgSim = data.avg_similarity ? data.avg_similarity.toFixed(4) : '—';
+
+    content.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
+        <div class="stat-card"><div class="stat-label">ВСЕГО ПОПЫТОК</div><div class="stat-value blue">${total}</div></div>
+        <div class="stat-card"><div class="stat-label">УСПЕШНЫХ</div><div class="stat-value green">${success}</div></div>
+        <div class="stat-card"><div class="stat-label">УСПЕШНОСТЬ</div><div class="stat-value ${rate >= 70 ? 'green' : 'red'}">${rate}%</div></div>
+        <div class="stat-card"><div class="stat-label">СР. СХОДСТВО</div><div class="stat-value yellow">${avgSim}</div></div>
+      </div>`;
+  } catch(e) {
+    content.innerHTML = '<p style="color:var(--danger);font-size:13px;">Ошибка загрузки</p>';
+  }
+}
+
+// ── LOGS ─────────────────────────────────────────────────────
+async function loadLogs(filter = 'all') {
+  const tbody = document.getElementById('logsTbody');
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">Загрузка...</td></tr>';
+
+  try {
+    const r = await fetch(`/api/admin/logs?filter=${filter}&limit=50`);
+    const data = await r.json();
+
+    if (!data.logs || data.logs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px;">Логов нет</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.logs.map(log => {
+      const time = log.created_at ? log.created_at.replace('T',' ').slice(0,19) : '—';
+      const sim = log.face_similarity ? log.face_similarity.toFixed(4) : '—';
+      const simPct = log.face_similarity ? Math.round(log.face_similarity * 100) : 0;
+      const simColor = simPct >= 70 ? '#10b981' : simPct >= 50 ? '#f59e0b' : '#ef4444';
+      const faceIcon = log.face_passed ? '<span style="color:#10b981">✓</span>' : '<span style="color:#ef4444">✗</span>';
+      const otpIcon = log.otp_passed ? '<span style="color:#10b981">✓</span>' : '<span style="color:#ef4444">✗</span>';
+      const successBadge = log.success
+        ? '<span class="badge badge-green">✓ Успех</span>'
+        : '<span class="badge badge-red">✗ Отказ</span>';
+
+      return `<tr>
+        <td style="color:var(--muted)">${time}</td>
+        <td style="font-weight:700">${log.user_id || '—'}</td>
+        <td>${faceIcon}</td>
+        <td>${otpIcon}</td>
+        <td>${sim} <span class="sim-bar-mini"><span class="sim-fill" style="width:${simPct}%;background:${simColor}"></span></span></td>
+        <td>${successBadge}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--danger);padding:20px;">Ошибка: ${e.message}</td></tr>`;
+  }
+}
+
+// ── TRAINING ─────────────────────────────────────────────────
+async function startTraining() {
+  const epochs = document.getElementById('epochs').value;
+  const btn = document.getElementById('trainBtn');
+  const logBox = document.getElementById('logBox');
+
+  btn.disabled = true; btn.textContent = '⏳ Обучение...';
+  logBox.style.display = 'block';
+  logBox.textContent = 'Запуск обучения...\n';
+
+  const fd = new FormData();
+  fd.append('epochs', epochs);
+
+  try {
+    const r = await fetch('/api/train', { method:'POST', body:fd });
+    const data = await r.json();
+    if (data.success) {
+      logBox.textContent = data.output || 'Обучение завершено!';
+      showAlert('trainAlert','success','✓ Модель обучена и загружена!');
+    } else {
+      logBox.textContent = data.error || 'Ошибка';
+      showAlert('trainAlert','error','Ошибка обучения.');
+    }
+  } catch(e) { showAlert('trainAlert','error','Ошибка: ' + e.message); }
+  btn.disabled = false; btn.textContent = '⚡ Запустить обучение';
+}
+
+// ── UPLOAD TRAIN DATA ────────────────────────────────────────
+let trainFiles = [];
+document.getElementById('trainFiles').addEventListener('change', e => {
+  trainFiles = [...e.target.files];
+  document.getElementById('trainFileCount').textContent = `Выбрано: ${trainFiles.length} фото`;
+});
+
+async function uploadTrainData() {
+  const userId = document.getElementById('trainUserId').value.trim();
+  if (!userId) return showAlert('uploadAlert','error','Введите ID пользователя');
+  if (!trainFiles.length) return showAlert('uploadAlert','error','Выберите фото');
+
+  const fd = new FormData();
+  fd.append('user_id', userId);
+  trainFiles.forEach(f => fd.append('files', f));
+
+  try {
+    const r = await fetch('/api/upload-training-data', { method:'POST', body:fd });
+    const data = await r.json();
+    if (data.success) {
+      showAlert('uploadAlert','success',`✓ Загружено ${data.saved} фото для "${userId}"`);
+      trainFiles = []; document.getElementById('trainFileCount').textContent = '';
+      document.getElementById('trainUserId').value = '';
+    } else {
+      showAlert('uploadAlert','error','Ошибка загрузки');
+    }
+  } catch(e) { showAlert('uploadAlert','error','Ошибка: ' + e.message); }
+}
+
+function showAlert(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = `alert alert-${type}`; el.textContent = msg; el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+// Auto-load logs when panel opens
+if (sessionStorage.getItem('adminAuth') === '1') {
+  setTimeout(() => loadLogs('all'), 100);
+}
+</script>
+</body>
+</html>

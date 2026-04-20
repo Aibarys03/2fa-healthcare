@@ -142,7 +142,35 @@ async def upload_data_page(request: Request):
         "request": request,
         "users_info": users_info
     })
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    from database import get_all_users, get_embedding, get_otp_secret
+    import json
 
+    # Получаем список пользователей с доп. инфо
+    user_ids = verifier.get_registered_users() if verifier else []
+    users = []
+    for uid in user_ids:
+        has_otp = get_otp_secret(uid) is not None
+        # Получаем дату из Supabase если есть
+        try:
+            from database import db
+            res = db().table("user_embeddings").select("created_at").eq("user_id", uid).execute()
+            created_at = res.data[0]["created_at"] if res.data else None
+        except:
+            created_at = None
+        users.append({"user_id": uid, "has_otp": has_otp, "created_at": created_at})
+
+    history = get_training_history()
+    threshold = verifier.threshold if verifier else DEFAULT_THRESHOLD
+
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "users": users,
+        "model_exists": os.path.exists('models/best_model.pth'),
+        "history": history,
+        "threshold": threshold,
+    })
 
 # ─── API: Загрузка данных для обучения ──────────────────────────────────────
 
@@ -177,16 +205,65 @@ async def upload_training_data(
         "errors": errors
     }
 
-@app.delete("/api/delete-user-data/{user_id}")
-async def delete_user_data(user_id: str):
-    """Удаляет все данные пользователя."""
+@app.delete("/api/admin/delete-user/{user_id}")
+async def admin_delete_user(user_id: str):
     import shutil
+    # Удаляем локальные данные
     user_dir = Path(f'data/users/{user_id}')
     if user_dir.exists():
         shutil.rmtree(user_dir)
+    # Удаляем из verifier (память)
     if verifier:
         verifier.delete_user(user_id)
-    return {"success": True, "message": f"Данные {user_id} удалены"}
+    # Удаляем из Supabase
+    from database import delete_user_embedding
+    delete_user_embedding(user_id)
+    return {"success": True, "message": f"Пользователь {user_id} удалён"}
+
+
+@app.get("/api/admin/user-stats/{user_id}")
+async def admin_user_stats(user_id: str):
+    try:
+        from database import db
+        res = db().table("auth_logs") \
+            .select("success, face_similarity, face_passed, otp_passed") \
+            .eq("user_id", user_id) \
+            .execute()
+        logs = res.data or []
+        total = len(logs)
+        success_count = sum(1 for l in logs if l.get("success"))
+        sims = [l["face_similarity"] for l in logs if l.get("face_similarity") is not None]
+        avg_sim = sum(sims) / len(sims) if sims else None
+        return {
+            "user_id": user_id,
+            "total": total,
+            "success_count": success_count,
+            "avg_similarity": avg_sim,
+        }
+    except Exception as e:
+        return {"user_id": user_id, "total": 0, "success_count": 0, "avg_similarity": None}
+
+
+# ── API: Логи аутентификации ──────────────────────────────────────────────────
+
+
+@app.get("/api/admin/logs")
+async def admin_logs(filter: str = "all", limit: int = 50):
+    try:
+        from database import db
+        query = db().table("auth_logs") \
+            .select("*") \
+            .order("created_at", desc=True) \
+            .limit(limit)
+        if filter == "success":
+            query = query.eq("success", True)
+        elif filter == "fail":
+            query = query.eq("success", False)
+        res = query.execute()
+        return {"logs": res.data or []}
+    except Exception as e:
+        return {"logs": [], "error": str(e)}
+
 
 @app.get("/api/dataset-info")
 async def dataset_info():

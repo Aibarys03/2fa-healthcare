@@ -6,119 +6,137 @@
 <title>Верификация — 2FA</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap');
-  :root { --bg:#060912; --surface:#0d1117; --surface2:#161b27; --border:#1e2a3a; --accent:#00d4ff; --accent2:#7c3aed; --accent3:#10b981; --danger:#ef4444; --warning:#f59e0b; --text:#e2e8f0; --muted:#64748b; }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Syne',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
-  body::before { content:''; position:fixed; inset:0; background-image:linear-gradient(rgba(0,212,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.03) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; z-index:0; }
-  .container { max-width:640px; margin:0 auto; padding:0 24px; position:relative; z-index:1; }
-  header { border-bottom:1px solid var(--border); padding:20px 0; margin-bottom:40px; }
-  .header-inner { display:flex; align-items:center; justify-content:space-between; }
-  .logo { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); }
-  .logo-icon { width:36px; height:36px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px; }
-  .logo-text { font-size:16px; font-weight:800; }
-  .logo-text span { color:var(--accent); }
-  nav { display:flex; gap:4px; }
-  nav a { padding:8px 16px; border-radius:6px; text-decoration:none; color:var(--muted); font-size:14px; font-weight:600; transition:all 0.2s; font-family:'Space Mono',monospace; }
-  nav a:hover, nav a.active { color:var(--accent); background:rgba(0,212,255,0.08); }
+  :root{--bg:#060912;--surface:#0d1117;--surface2:#161b27;--border:#1e2a3a;--accent:#00d4ff;--accent2:#7c3aed;--accent3:#10b981;--danger:#ef4444;--warning:#f59e0b;--text:#e2e8f0;--muted:#64748b;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+  .container{max-width:640px;margin:0 auto;padding:0 16px;position:relative;z-index:1;}
 
-  h2 { font-size:28px; font-weight:800; letter-spacing:-1px; margin-bottom:8px; }
-  .page-subtitle { color:var(--muted); font-size:15px; margin-bottom:32px; }
-
-  /* Steps indicator */
-  .steps { display:flex; align-items:center; gap:0; margin-bottom:36px; }
-  .step-item { display:flex; align-items:center; gap:10px; flex:1; }
-  .step-circle {
-    width:36px; height:36px; border-radius:50%;
-    display:flex; align-items:center; justify-content:center;
-    font-weight:800; font-size:14px; flex-shrink:0;
-    border:2px solid var(--border); color:var(--muted);
-    transition:all 0.3s;
+  /* HEADER */
+  header{border-bottom:1px solid var(--border);padding:16px 0;margin-bottom:32px;}
+  .header-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);}
+  .logo-icon{width:34px;height:34px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
+  .logo-text{font-size:15px;font-weight:800;} .logo-text span{color:var(--accent);}
+  nav{display:flex;gap:4px;flex-wrap:wrap;}
+  nav a{padding:7px 13px;border-radius:6px;text-decoration:none;color:var(--muted);font-size:13px;font-weight:600;transition:all 0.2s;font-family:'Space Mono',monospace;white-space:nowrap;}
+  nav a:hover,nav a.active{color:var(--accent);background:rgba(0,212,255,0.08);}
+  nav a.admin-link{color:var(--warning);}
+  nav a.admin-link:hover{color:var(--warning);background:rgba(245,158,11,0.1);}
+  .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);}
+  .hamburger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
+  @media(max-width:640px){
+    .hamburger{display:flex;}
+    nav{display:none;width:100%;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;margin-top:8px;}
+    nav.open{display:flex;}
+    nav a{padding:10px 14px;}
   }
-  .step-circle.active { border-color:var(--accent); color:var(--accent); background:rgba(0,212,255,0.08); }
-  .step-circle.done { border-color:var(--accent3); color:var(--accent3); background:rgba(16,185,129,0.08); }
-  .step-label { font-size:13px; font-weight:600; color:var(--muted); transition:color 0.3s; }
-  .step-label.active { color:var(--accent); }
-  .step-label.done { color:var(--accent3); }
-  .step-line { flex:1; height:1px; background:var(--border); margin:0 12px; }
 
-  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px; margin-bottom:24px; }
-  label { display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:8px; font-family:'Space Mono',monospace; letter-spacing:0.5px; }
+  h2{font-size:24px;font-weight:800;letter-spacing:-0.5px;margin-bottom:6px;}
+  @media(max-width:480px){h2{font-size:20px;}}
+  .page-subtitle{color:var(--muted);font-size:14px;margin-bottom:24px;}
 
-  select {
-    width:100%; padding:12px 16px;
-    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
-    color:var(--text); font-size:15px; font-family:'Syne',sans-serif;
-    outline:none; cursor:pointer; margin-bottom:16px; appearance:none;
+  /* STEPPER */
+  .steps{display:flex;align-items:center;margin-bottom:28px;}
+  .step-item{display:flex;align-items:center;gap:8px;flex:1;}
+  .step-circle{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0;border:2px solid var(--border);color:var(--muted);transition:all 0.3s;}
+  .step-circle.active{border-color:var(--accent);color:var(--accent);background:rgba(0,212,255,0.08);}
+  .step-circle.done{border-color:var(--accent3);color:var(--accent3);background:rgba(16,185,129,0.08);}
+  .step-label{font-size:12px;font-weight:600;color:var(--muted);transition:color 0.3s;}
+  .step-label.active{color:var(--accent);}
+  .step-label.done{color:var(--accent3);}
+  .step-line{flex:1;height:1px;background:var(--border);margin:0 8px;}
+
+  /* CARD */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:20px;}
+  label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;font-family:'Space Mono',monospace;letter-spacing:0.5px;}
+
+  select{width:100%;padding:11px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:'Syne',sans-serif;outline:none;cursor:pointer;margin-bottom:14px;appearance:none;}
+  select:focus{border-color:var(--accent);}
+
+  .dropzone{border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;transition:all 0.2s;background:var(--surface2);}
+  .dropzone:hover,.dropzone.dragover{border-color:var(--accent);background:rgba(0,212,255,0.04);}
+  .dropzone-icon{font-size:24px;margin-bottom:8px;}
+  .dropzone-text{font-size:13px;color:var(--muted);}
+  .dropzone-text strong{color:var(--accent);}
+  #fileInput{display:none;}
+
+  .face-preview{width:100%;max-height:200px;border-radius:8px;object-fit:cover;margin:10px 0;display:none;border:2px solid var(--border);}
+
+  .btn{width:100%;padding:13px;border:none;border-radius:10px;cursor:pointer;font-family:'Syne',sans-serif;font-size:14px;font-weight:700;transition:all 0.2s;margin-top:14px;}
+  .btn-face{background:linear-gradient(135deg,var(--accent),#0099cc);color:#000;}
+  .btn-face:hover{opacity:0.9;transform:translateY(-1px);}
+  .btn-otp{background:linear-gradient(135deg,var(--accent2),#5b21b6);color:white;}
+  .btn-otp:hover{opacity:0.9;transform:translateY(-1px);}
+  .btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+
+  /* ── OTP INPUT — FIXED SIZE ── */
+  .otp-wrap{margin:14px 0;}
+  .otp-input-row{display:flex;gap:8px;justify-content:center;}
+  .otp-digit{
+    width:44px; height:52px;
+    text-align:center;
+    background:var(--surface2);
+    border:2px solid var(--border);
+    border-radius:10px;
+    color:var(--text);
+    font-size:22px;
+    font-family:'Space Mono',monospace;
+    font-weight:700;
+    outline:none;
+    transition:border-color 0.2s;
+    /* Prevent mobile zoom */
+    font-size:22px;
+    -webkit-text-size-adjust:none;
   }
-  select:focus { border-color:var(--accent); }
-
-  .dropzone { border:2px dashed var(--border); border-radius:12px; padding:28px; text-align:center; cursor:pointer; transition:all 0.2s; background:var(--surface2); }
-  .dropzone:hover, .dropzone.dragover { border-color:var(--accent); background:rgba(0,212,255,0.04); }
-  .dropzone-icon { font-size:28px; margin-bottom:10px; }
-  .dropzone-text { font-size:13px; color:var(--muted); }
-  .dropzone-text strong { color:var(--accent); }
-  #fileInput { display:none; }
-
-  .face-preview { width:100%; max-height:240px; border-radius:10px; object-fit:cover; margin:12px 0; display:none; border:2px solid var(--border); }
-
-  .btn { width:100%; padding:14px; border:none; border-radius:10px; cursor:pointer; font-family:'Syne',sans-serif; font-size:15px; font-weight:700; transition:all 0.2s; margin-top:16px; }
-  .btn-face { background:linear-gradient(135deg,var(--accent),#0099cc); color:#000; }
-  .btn-face:hover { opacity:0.9; transform:translateY(-1px); }
-  .btn-otp { background:linear-gradient(135deg,var(--accent2),#5b21b6); color:white; }
-  .btn-otp:hover { opacity:0.9; transform:translateY(-1px); }
-  .btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
-
-  /* OTP Input */
-  .otp-input-row { display:flex; gap:10px; margin:16px 0; }
-  .otp-digit {
-    flex:1; height:60px; text-align:center;
-    background:var(--surface2); border:2px solid var(--border); border-radius:10px;
-    color:var(--text); font-size:24px; font-family:'Space Mono',monospace; font-weight:700;
-    outline:none; transition:border-color 0.2s;
+  .otp-digit:focus{border-color:var(--accent2);}
+  @media(max-width:380px){
+    .otp-digit{width:38px;height:46px;font-size:18px;gap:6px;}
+    .otp-input-row{gap:6px;}
   }
-  .otp-digit:focus { border-color:var(--accent2); }
 
-  /* Result panels */
-  .face-result { padding:16px; border-radius:10px; display:flex; align-items:center; gap:14px; margin-top:16px; display:none; }
-  .face-result.success { background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); }
-  .face-result.fail { background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); }
-  .result-icon { font-size:28px; flex-shrink:0; }
-  .result-title { font-size:16px; font-weight:800; }
-  .result-sub { font-size:13px; color:var(--muted); margin-top:4px; font-family:'Space Mono',monospace; }
+  /* RESULT */
+  .face-result{padding:14px;border-radius:10px;display:flex;align-items:flex-start;gap:12px;margin-top:14px;display:none;}
+  .face-result.success{background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);}
+  .face-result.fail{background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);}
+  .result-icon{font-size:24px;flex-shrink:0;}
+  .result-title{font-size:15px;font-weight:800;}
+  .result-sub{font-size:12px;color:var(--muted);margin-top:3px;font-family:'Space Mono',monospace;}
+  .sim-bar-wrap{margin-top:8px;}
+  .sim-bar-label{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:4px;}
+  .sim-bar-bg{background:var(--surface2);border-radius:100px;height:7px;overflow:hidden;}
+  .sim-bar-fill{height:100%;border-radius:100px;transition:width 0.8s ease;}
 
-  /* Similarity bar */
-  .sim-bar-wrap { margin-top:10px; }
-  .sim-bar-label { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); font-family:'Space Mono',monospace; margin-bottom:5px; }
-  .sim-bar-bg { background:var(--surface2); border-radius:100px; height:8px; overflow:hidden; }
-  .sim-bar-fill { height:100%; border-radius:100px; transition:width 0.8s ease; }
+  /* SUCCESS */
+  .auth-success{background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(0,212,255,0.08));border:1px solid rgba(16,185,129,0.3);border-radius:14px;padding:28px;text-align:center;margin-bottom:20px;display:none;}
+  .auth-success-icon{font-size:48px;margin-bottom:12px;}
+  .auth-success-title{font-size:24px;font-weight:800;color:var(--accent3);letter-spacing:-0.5px;margin-bottom:6px;}
+  .auth-success-user{font-family:'Space Mono',monospace;font-size:13px;color:var(--muted);margin-bottom:16px;}
+  .auth-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;}
+  .auth-meta-item{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px;}
+  .auth-meta-label{font-size:10px;color:var(--muted);font-family:'Space Mono',monospace;letter-spacing:1px;margin-bottom:3px;}
+  .auth-meta-value{font-size:16px;font-weight:800;}
 
-  /* Auth success */
-  .auth-success {
-    background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(0,212,255,0.08));
-    border:1px solid rgba(16,185,129,0.3);
-    border-radius:16px; padding:36px; text-align:center;
-    margin-bottom:24px; display:none;
-  }
-  .auth-success-icon { font-size:56px; margin-bottom:16px; }
-  .auth-success-title { font-size:28px; font-weight:800; color:var(--accent3); letter-spacing:-1px; margin-bottom:8px; }
-  .auth-success-user { font-family:'Space Mono',monospace; font-size:14px; color:var(--muted); margin-bottom:20px; }
-  .auth-meta { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px; }
-  .auth-meta-item { background:rgba(0,0,0,0.3); border-radius:8px; padding:12px; }
-  .auth-meta-label { font-size:10px; color:var(--muted); font-family:'Space Mono',monospace; letter-spacing:1px; margin-bottom:4px; }
-  .auth-meta-value { font-size:16px; font-weight:800; color:var(--text); }
-
-  .section-hidden { display:none; }
-  .attempts-badge { display:inline-block; padding:4px 10px; background:rgba(245,158,11,0.12); border-radius:100px; font-size:12px; color:var(--warning); font-family:'Space Mono',monospace; margin-top:8px; }
+  .section-hidden{display:none;}
+  .attempts-badge{display:inline-block;padding:4px 10px;background:rgba(245,158,11,0.12);border-radius:100px;font-size:12px;color:var(--warning);font-family:'Space Mono',monospace;margin-top:8px;}
 </style>
 </head>
 <body>
 <header>
   <div class="container">
     <div class="header-inner">
-      <a href="/" class="logo"><div class="logo-icon">🔐</div><div class="logo-text">Few<span>Shot</span>2FA</div></a>
-      <nav>
-        <a href="/">Главная</a><a href="/upload-data">Данные</a>
-        <a href="/register">Регистрация</a><a href="/verify" class="active">Верификация</a>
+      <a href="/" class="logo">
+        <div class="logo-icon">🔐</div>
+        <div class="logo-text">Few<span>Shot</span>2FA</div>
+      </a>
+      <div class="hamburger" onclick="toggleNav()">
+        <span></span><span></span><span></span>
+      </div>
+      <nav id="mainNav">
+        <a href="/">Главная</a>
+        <a href="/register">Регистрация</a>
+        <a href="/verify" class="active">Верификация</a>
+        <a href="/admin" class="admin-link">⚙ Админ</a>
       </nav>
     </div>
   </div>
@@ -128,7 +146,7 @@
   <h2>🛡️ Двухфакторная верификация</h2>
   <p class="page-subtitle">Шаг 1: распознавание лица. Шаг 2: одноразовый пароль.</p>
 
-  <!-- Stepper -->
+  <!-- STEPPER -->
   <div class="steps">
     <div class="step-item">
       <div class="step-circle active" id="step1circle">1</div>
@@ -146,9 +164,9 @@
     </div>
   </div>
 
-  <!-- Step 1: Face -->
+  <!-- STEP 1 -->
   <div id="faceSection" class="card">
-    <div style="font-size:16px; font-weight:800; margin-bottom:20px;">📸 Шаг 1 — Верификация лица</div>
+    <div style="font-size:15px;font-weight:800;margin-bottom:16px;">📸 Шаг 1 — Верификация лица</div>
 
     <label>ПОЛЬЗОВАТЕЛЬ</label>
     <select id="userId">
@@ -161,16 +179,16 @@
     <label>ФОТО ДЛЯ ВЕРИФИКАЦИИ</label>
     <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
       <div class="dropzone-icon">🤳</div>
-      <div class="dropzone-text"><strong>Загрузите</strong> фото лица<br><small>Один снимок для верификации</small></div>
+      <div class="dropzone-text"><strong>Загрузите</strong> фото лица</div>
     </div>
-    <input type="file" id="fileInput" accept="image/*">
+    <input type="file" id="fileInput" accept="image/*" capture="user">
     <img id="facePreview" class="face-preview" alt="Предпросмотр">
 
     <button class="btn btn-face" onclick="verifyFace()" id="faceBtn">🔍 Верифицировать лицо</button>
 
     <div id="faceResult" class="face-result">
       <div class="result-icon" id="resultIcon"></div>
-      <div>
+      <div style="flex:1;">
         <div class="result-title" id="resultTitle"></div>
         <div class="result-sub" id="resultSub"></div>
         <div class="sim-bar-wrap" id="simBarWrap">
@@ -185,25 +203,26 @@
     </div>
   </div>
 
-  <!-- Step 2: OTP -->
+  <!-- STEP 2 -->
   <div id="otpSection" class="card section-hidden">
-    <div style="font-size:16px; font-weight:800; margin-bottom:6px;">🔑 Шаг 2 — OTP-код</div>
-    <p style="color:var(--muted); font-size:14px; margin-bottom:20px;">Введите 6-значный код из вашего аутентификатора (Google Authenticator / Aegis).</p>
+    <div style="font-size:15px;font-weight:800;margin-bottom:6px;">🔑 Шаг 2 — OTP-код</div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Введите 6-значный код из Google Authenticator / Aegis.</p>
 
-    <div class="otp-input-row" id="otpInputs">
-      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
-      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
-      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
-      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
-      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
-      <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+    <div class="otp-wrap">
+      <div class="otp-input-row" id="otpInputs">
+        <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+        <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+        <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+        <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+        <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+        <input type="text" class="otp-digit" maxlength="1" inputmode="numeric" pattern="[0-9]">
+      </div>
     </div>
     <div id="attemptsInfo" class="attempts-badge" style="display:none;"></div>
-
     <button class="btn btn-otp" onclick="verifyOTP()" id="otpBtn">✓ Подтвердить OTP</button>
   </div>
 
-  <!-- Success -->
+  <!-- SUCCESS -->
   <div class="auth-success" id="authSuccess">
     <div class="auth-success-icon">🎉</div>
     <div class="auth-success-title">Аутентификация успешна!</div>
@@ -218,156 +237,166 @@
         <div class="auth-meta-value" style="color:var(--accent3);">✓ Верен</div>
       </div>
     </div>
-    <button class="btn" style="background:var(--surface2); color:var(--text); margin-top:20px;" onclick="reset()">🔄 Новая сессия</button>
+    <button class="btn" style="background:var(--surface2);color:var(--text);margin-top:16px;" onclick="location.reload()">🔄 Новая сессия</button>
   </div>
 </div>
 
 <script>
-  let sessionId = null;
-  let faceSimlarity = 0;
-  let selectedFile = null;
+let sessionId = null;
+let faceSimilarity = 0;
+let selectedFile = null;
 
-  // File handling
-  const dropzone = document.getElementById('dropzone');
-  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
-  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-  dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
-  document.getElementById('fileInput').addEventListener('change', e => handleFile(e.target.files[0]));
+function toggleNav() {
+  document.getElementById('mainNav').classList.toggle('open');
+}
 
-  function handleFile(f) {
-    if (!f || !f.type.startsWith('image/')) return;
-    selectedFile = f;
-    const preview = document.getElementById('facePreview');
-    preview.src = URL.createObjectURL(f);
-    preview.style.display = 'block';
-    document.getElementById('faceResult').style.display = 'none';
-  }
+// File handling
+const dropzone = document.getElementById('dropzone');
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
+document.getElementById('fileInput').addEventListener('change', e => handleFile(e.target.files[0]));
 
-  async function verifyFace() {
-    const userId = document.getElementById('userId').value;
-    if (!userId) return alert('Выберите пользователя');
-    if (!selectedFile) return alert('Загрузите фото');
+function handleFile(f) {
+  if (!f || !f.type.startsWith('image/')) return;
+  selectedFile = f;
+  const preview = document.getElementById('facePreview');
+  preview.src = URL.createObjectURL(f);
+  preview.style.display = 'block';
+  document.getElementById('faceResult').style.display = 'none';
+}
 
-    const btn = document.getElementById('faceBtn');
-    btn.disabled = true; btn.textContent = '⏳ Анализирую...';
+async function verifyFace() {
+  const userId = document.getElementById('userId').value;
+  if (!userId) return alert('Выберите пользователя');
+  if (!selectedFile) return alert('Загрузите фото');
 
-    const fd = new FormData();
-    fd.append('user_id', userId);
-    fd.append('file', selectedFile);
+  const btn = document.getElementById('faceBtn');
+  btn.disabled = true; btn.textContent = '⏳ Анализирую...';
 
-    try {
-      const r = await fetch('/api/verify-face', { method:'POST', body:fd });
-      const data = await r.json();
+  const fd = new FormData();
+  fd.append('user_id', userId);
+  fd.append('file', selectedFile);
 
-      const resultDiv = document.getElementById('faceResult');
-      resultDiv.style.display = 'flex';
+  try {
+    const r = await fetch('/api/verify-face', { method:'POST', body:fd });
+    const data = await r.json();
 
-      const sim = data.similarity || 0;
-      const pct = Math.round(sim * 100);
-      faceSimlarity = sim;
+    const resultDiv = document.getElementById('faceResult');
+    resultDiv.style.display = 'flex';
 
-      document.getElementById('simValue').textContent = sim.toFixed(4);
-      document.getElementById('simBar').style.width = pct + '%';
-      document.getElementById('simBar').style.background = sim >= (data.threshold || 0.7)
-        ? 'linear-gradient(90deg,#10b981,#00d4ff)' : 'linear-gradient(90deg,#ef4444,#f59e0b)';
+    const sim = data.similarity || 0;
+    const pct = Math.round(sim * 100);
+    faceSimilarity = sim;
 
-      if (data.verified) {
-        sessionId = data.session_id;
-        resultDiv.className = 'face-result success';
-        document.getElementById('resultIcon').textContent = '✅';
-        document.getElementById('resultTitle').textContent = 'Лицо распознано!';
-        document.getElementById('resultSub').textContent = `Сходство: ${sim.toFixed(4)} ≥ порог ${data.threshold}`;
+    document.getElementById('simValue').textContent = sim.toFixed(4);
+    document.getElementById('simBar').style.width = pct + '%';
+    document.getElementById('simBar').style.background = sim >= (data.threshold || 0.7)
+      ? 'linear-gradient(90deg,#10b981,#00d4ff)' : 'linear-gradient(90deg,#ef4444,#f59e0b)';
 
-        // Переход ко шагу 2
-        setTimeout(() => {
-          setStep(2);
-          document.getElementById('faceSection').style.opacity = '0.5';
-          document.getElementById('faceSection').style.pointerEvents = 'none';
-          document.getElementById('otpSection').classList.remove('section-hidden');
-          document.getElementById('otpSection').scrollIntoView({behavior:'smooth'});
-          document.querySelectorAll('.otp-digit')[0].focus();
-        }, 800);
-      } else {
-        resultDiv.className = 'face-result fail';
-        document.getElementById('resultIcon').textContent = '❌';
-        document.getElementById('resultTitle').textContent = 'Верификация не пройдена';
-        document.getElementById('resultSub').textContent = data.error || `Сходство: ${sim.toFixed(4)} < порог ${data.threshold}`;
-      }
-    } catch(e) {
-      alert('Ошибка: ' + e.message);
-    }
-    btn.disabled = false; btn.textContent = '🔍 Верифицировать лицо';
-  }
+    if (data.verified) {
+      sessionId = data.session_id;
+      resultDiv.className = 'face-result success';
+      document.getElementById('resultIcon').textContent = '✅';
+      document.getElementById('resultTitle').textContent = 'Лицо распознано!';
+      document.getElementById('resultSub').textContent = `Сходство: ${sim.toFixed(4)} ≥ порог ${data.threshold}`;
 
-  // OTP digit navigation
-  document.querySelectorAll('.otp-digit').forEach((input, idx, all) => {
-    input.addEventListener('keyup', e => {
-      if (e.key >= '0' && e.key <= '9' && idx < all.length - 1) all[idx + 1].focus();
-      if (e.key === 'Backspace' && idx > 0) all[idx - 1].focus();
-      if (e.key === 'Enter') verifyOTP();
-    });
-    input.addEventListener('input', () => {
-      input.value = input.value.replace(/\D/g,'').slice(-1);
-    });
-  });
-
-  async function verifyOTP() {
-    const digits = [...document.querySelectorAll('.otp-digit')].map(i => i.value);
-    const code = digits.join('');
-    if (code.length !== 6) return alert('Введите 6 цифр');
-
-    const btn = document.getElementById('otpBtn');
-    btn.disabled = true; btn.textContent = '⏳ Проверяю...';
-
-    const fd = new FormData();
-    fd.append('session_id', sessionId);
-    fd.append('otp_code', code);
-
-    try {
-      const r = await fetch('/api/verify-otp', { method:'POST', body:fd });
-      const data = await r.json();
-
-      if (data.authenticated) {
-        setStep(3);
-        document.getElementById('otpSection').style.display = 'none';
-        document.getElementById('faceSection').style.display = 'none';
-
-        const successDiv = document.getElementById('authSuccess');
-        successDiv.style.display = 'block';
-        document.getElementById('successUser').textContent = `Пользователь: ${data.user_id}`;
-        document.getElementById('metaSim').textContent = faceSimlarity.toFixed(4);
-        successDiv.scrollIntoView({behavior:'smooth'});
-      } else {
-        const info = document.getElementById('attemptsInfo');
-        if (data.attempts_left !== undefined) {
-          info.style.display = 'inline-block';
-          info.textContent = `Неверный код. Осталось попыток: ${data.attempts_left}`;
-        }
-        if (data.attempts_left === 0 || data.error) {
-          alert(data.error || 'Все попытки исчерпаны. Начните заново.');
-          reset();
-        }
-        document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+      setTimeout(() => {
+        setStep(2);
+        document.getElementById('faceSection').style.opacity = '0.5';
+        document.getElementById('faceSection').style.pointerEvents = 'none';
+        document.getElementById('otpSection').classList.remove('section-hidden');
+        document.getElementById('otpSection').scrollIntoView({behavior:'smooth'});
         document.querySelectorAll('.otp-digit')[0].focus();
-      }
-    } catch(e) {
-      alert('Ошибка: ' + e.message);
+      }, 700);
+    } else {
+      resultDiv.className = 'face-result fail';
+      document.getElementById('resultIcon').textContent = '❌';
+      document.getElementById('resultTitle').textContent = 'Верификация не пройдена';
+      document.getElementById('resultSub').textContent = data.error || `Сходство: ${sim.toFixed(4)} < порог ${data.threshold}`;
     }
-    btn.disabled = false; btn.textContent = '✓ Подтвердить OTP';
-  }
+  } catch(e) { alert('Ошибка: ' + e.message); }
+  btn.disabled = false; btn.textContent = '🔍 Верифицировать лицо';
+}
 
-  function setStep(n) {
-    ['step1', 'step2', 'step3'].forEach((id, i) => {
-      const circle = document.getElementById(id + 'circle');
-      const label = document.getElementById(id + 'label');
-      circle.className = 'step-circle' + (i + 1 < n ? ' done' : i + 1 === n ? ' active' : '');
-      label.className = 'step-label' + (i + 1 < n ? ' done' : i + 1 === n ? ' active' : '');
-    });
-  }
+// OTP navigation
+document.querySelectorAll('.otp-digit').forEach((input, idx, all) => {
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Backspace') {
+      if (input.value) { input.value = ''; }
+      else if (idx > 0) { all[idx-1].focus(); all[idx-1].value = ''; }
+      e.preventDefault();
+    }
+    if (e.key === 'Enter') verifyOTP();
+  });
+  input.addEventListener('input', () => {
+    input.value = input.value.replace(/\D/g,'').slice(-1);
+    if (input.value && idx < all.length - 1) all[idx+1].focus();
+    // Auto-submit when all filled
+    const code = [...all].map(i => i.value).join('');
+    if (code.length === 6) verifyOTP();
+  });
+  // Handle paste
+  input.addEventListener('paste', e => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g,'');
+    [...all].forEach((el, i) => { el.value = text[i] || ''; });
+    if (text.length >= 6) verifyOTP();
+    else all[Math.min(text.length, 5)].focus();
+  });
+});
 
-  function reset() {
-    location.reload();
-  }
+async function verifyOTP() {
+  const digits = [...document.querySelectorAll('.otp-digit')].map(i => i.value);
+  const code = digits.join('');
+  if (code.length !== 6) return;
+
+  const btn = document.getElementById('otpBtn');
+  btn.disabled = true; btn.textContent = '⏳ Проверяю...';
+
+  const fd = new FormData();
+  fd.append('session_id', sessionId);
+  fd.append('otp_code', code);
+
+  try {
+    const r = await fetch('/api/verify-otp', { method:'POST', body:fd });
+    const data = await r.json();
+
+    if (data.authenticated) {
+      setStep(3);
+      document.getElementById('otpSection').style.display = 'none';
+      document.getElementById('faceSection').style.display = 'none';
+      const s = document.getElementById('authSuccess');
+      s.style.display = 'block';
+      document.getElementById('successUser').textContent = `Пользователь: ${data.user_id}`;
+      document.getElementById('metaSim').textContent = faceSimilarity.toFixed(4);
+      s.scrollIntoView({behavior:'smooth'});
+    } else {
+      const info = document.getElementById('attemptsInfo');
+      if (data.attempts_left !== undefined) {
+        info.style.display = 'inline-block';
+        info.textContent = `Неверный код. Осталось: ${data.attempts_left}`;
+      }
+      if (data.attempts_left === 0 || data.error) {
+        alert(data.error || 'Все попытки исчерпаны. Начните заново.');
+        location.reload();
+        return;
+      }
+      document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+      document.querySelectorAll('.otp-digit')[0].focus();
+    }
+  } catch(e) { alert('Ошибка: ' + e.message); }
+  btn.disabled = false; btn.textContent = '✓ Подтвердить OTP';
+}
+
+function setStep(n) {
+  ['step1','step2','step3'].forEach((id, i) => {
+    const c = document.getElementById(id+'circle');
+    const l = document.getElementById(id+'label');
+    c.className = 'step-circle' + (i+1 < n ? ' done' : i+1 === n ? ' active' : '');
+    l.className = 'step-label' + (i+1 < n ? ' done' : i+1 === n ? ' active' : '');
+  });
+}
 </script>
 </body>
 </html>

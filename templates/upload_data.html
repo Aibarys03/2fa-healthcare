@@ -1,3 +1,4 @@
+templates/upload_data.html:
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -110,6 +111,19 @@
   .alert { padding: 14px 18px; border-radius: 10px; font-size: 14px; margin-top: 12px; display: none; }
   .alert-success { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: var(--accent3); }
   .alert-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--danger); }
+
+  .hamburger{display:none;flex-direction:column;gap:5px;cursor:pointer;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);}
+  .hamburger span{width:20px;height:2px;background:var(--text);border-radius:2px;}
+  nav a.admin-link{color:var(--warning);}
+  nav a.admin-link:hover{color:var(--warning);background:rgba(245,158,11,0.1);}
+  @media(max-width:640px){
+    .hamburger{display:flex;}
+    nav{display:none;width:100%;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;margin-top:8px;}
+    nav.open{display:flex;}
+    nav a{padding:10px 14px;}
+    .header-inner{flex-wrap:wrap;}
+  }
+
 </style>
 </head>
 <body>
@@ -117,11 +131,14 @@
   <div class="container">
     <div class="header-inner">
       <a href="/" class="logo"><div class="logo-icon">🔐</div><div class="logo-text">Few<span>Shot</span>2FA</div></a>
-      <nav>
+            <div class="hamburger" onclick="document.getElementById('mainNav').classList.toggle('open')">
+        <span></span><span></span><span></span>
+      </div>
+      <nav id="mainNav">
         <a href="/">Главная</a>
-        <a href="/upload-data" class="active">Данные</a>
         <a href="/register">Регистрация</a>
         <a href="/verify">Верификация</a>
+        <a href="/admin" class="admin-link">⚙ Админ</a>
       </nav>
     </div>
   </div>
@@ -326,3 +343,4 @@
 </script>
 </body>
 </html>
+
