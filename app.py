@@ -26,6 +26,12 @@ from database import (get_otp_secret, save_otp_secret, log_auth,
                        download_model_if_needed,
                        create_session, get_session,
                        update_session_attempts, delete_session)
+from liveness import (
+    start_liveness_session,
+    process_liveness_frame,
+    end_liveness_session,
+    get_liveness_session,
+)
 # ─── Инициализация ──────────────────────────────────────────────────────────
 
 app = FastAPI(title="2FA Face + OTP System", version="1.0.0")
@@ -367,27 +373,31 @@ async def register_user(
 
 @app.post("/api/verify-face")
 async def verify_face(
-    user_id: str = Form(...),
-    file: UploadFile = File(...)
+        user_id: str = Form(...),
+        file: UploadFile = File(...)
 ):
     if not verifier:
         raise HTTPException(400, "Модель не загружена")
 
     content = await file.read()
     probe_image = image_from_upload(content)
+
     result = verifier.verify(user_id, probe_image)
 
     if result.get('verified'):
         session_id = secrets.token_urlsafe(32)
         expires_at = time.time() + 300
-        create_session(session_id, user_id, expires_at, result['similarity'])
-        print(f"✓ Сессия создана: {session_id[:20]}...")  # ← добавьте эту строку
 
-        # Сохраняем сессию в Supabase (переживёт перезапуск)
+        # Создаём сессию в Supabase
         create_session(session_id, user_id, expires_at, result['similarity'])
+
+        # ── НОВОЕ: создаём отдельную liveness-сессию ──
+        start_liveness_session(session_id)
 
         result['session_id'] = session_id
-        result['message'] = 'Лицо верифицировано! Введите OTP.'
+        # ── ИЗМЕНЕНО: теперь следующий шаг — liveness, а не сразу OTP ──
+        result['next_step'] = 'liveness'
+        result['message'] = 'Лицо распознано. Подтвердите, что вы живой человек — моргните.'
     else:
         log_auth(user_id, result['similarity'], False, False, False)
         result['message'] = f'Верификация не пройдена (сходство: {result["similarity"]:.3f})'
@@ -395,24 +405,74 @@ async def verify_face(
     return result
 
 
+@app.post("/api/verify-liveness")
+async def verify_liveness(
+        session_id: str = Form(...),
+        file: UploadFile = File(...)
+):
+    """
+    Принимает один кадр от клиента. Клиент шлёт кадры с интервалом ~200 мс
+    до тех пор, пока не получит status="success" или status="failed".
+
+    Состояния:
+      pending  — продолжайте присылать кадры
+      success  — живость подтверждена, можно вводить OTP
+      failed   — атака обнаружена либо тайм-аут
+    """
+    # Проверяем, что face-сессия ещё жива
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(400, "Сессия не найдена или истекла")
+    if time.time() > session['expires_at']:
+        delete_session(session_id)
+        end_liveness_session(session_id)
+        raise HTTPException(400, "Сессия истекла. Начните заново.")
+
+    # Обрабатываем кадр
+    content = await file.read()
+    image = image_from_upload(content)
+    result = process_liveness_frame(session_id, image)
+
+    if result["status"] == "failed":
+        # Атака или тайм-аут — закрываем сессию и логируем
+        log_auth(
+            session['user_id'],
+            session['face_similarity'],
+            face_ok=True,  # лицо-то было верифицировано
+            otp_ok=False,
+            success=False,
+        )
+        delete_session(session_id)
+        end_liveness_session(session_id)
+
+    return result
+
+
 @app.post("/api/verify-otp")
 async def verify_otp(
-    session_id: str = Form(...),
-    otp_code: str = Form(...)
+        session_id: str = Form(...),
+        otp_code: str = Form(...)
 ):
-    # Читаем сессию из Supabase
     session = get_session(session_id)
-    print(f"Ищу сессию: {session_id[:20]}... → {session}")  # ← добавьте
-
     if not session:
         raise HTTPException(400, "Сессия не найдена или истекла")
 
     if time.time() > session['expires_at']:
         delete_session(session_id)
+        end_liveness_session(session_id)
         raise HTTPException(400, "Сессия истекла. Начните заново.")
+
+    # ── НОВОЕ: liveness обязательна перед вводом OTP ──
+    live = get_liveness_session(session_id)
+    if live is None or not live.blink_detected or not live.passive_passed:
+        raise HTTPException(
+            400,
+            "Liveness-проверка не пройдена. Подтвердите живость прежде чем вводить OTP."
+        )
 
     if session['attempts'] >= 3:
         delete_session(session_id)
+        end_liveness_session(session_id)
         return {
             'authenticated': False,
             'error': 'Превышено число попыток (3). Начните заново.'
@@ -420,7 +480,6 @@ async def verify_otp(
 
     user_id = session['user_id']
     secret = get_otp_secret(user_id)
-
     if not secret:
         raise HTTPException(400, f"OTP не настроен для {user_id}")
 
@@ -432,6 +491,7 @@ async def verify_otp(
 
     if valid:
         delete_session(session_id)
+        end_liveness_session(session_id)  # ← добавлено
         log_auth(user_id, session['face_similarity'], True, True, True)
         return {
             'authenticated': True,
@@ -444,7 +504,8 @@ async def verify_otp(
         attempts_left = 3 - new_attempts
         if attempts_left <= 0:
             delete_session(session_id)
-            log_auth(user_id, session['face_similarity'], True, False, False)
+            end_liveness_session(session_id)  # ← добавлено
+        log_auth(user_id, session['face_similarity'], True, False, False)
         return {
             'authenticated': False,
             'attempts_left': attempts_left,

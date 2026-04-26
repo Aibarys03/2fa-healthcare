@@ -144,7 +144,7 @@
 
 <div class="container">
   <h2>🛡️ Двухфакторная верификация</h2>
-  <p class="page-subtitle">Шаг 1: распознавание лица. Шаг 2: одноразовый пароль.</p>
+  <p class="page-subtitle">Шаг 1: распознавание лица. Шаг 2: проверка живости. Шаг 3: одноразовый пароль.</p>
 
   <!-- STEPPER -->
   <div class="steps">
@@ -155,12 +155,12 @@
     <div class="step-line"></div>
     <div class="step-item">
       <div class="step-circle" id="step2circle">2</div>
-      <div class="step-label" id="step2label">OTP-код</div>
+      <div class="step-label" id="step2label">Liveness</div>
     </div>
     <div class="step-line"></div>
     <div class="step-item">
-      <div class="step-circle" id="step3circle">✓</div>
-      <div class="step-label" id="step3label">Готово</div>
+      <div class="step-circle" id="step3circle">3</div>
+      <div class="step-label" id="step3label">OTP-код</div>
     </div>
   </div>
 
@@ -204,8 +204,27 @@
   </div>
 
   <!-- STEP 2 -->
+  <div id="livenessSection" class="card section-hidden">
+    <div style="font-size:15px;font-weight:800;margin-bottom:6px;">👁️ Шаг 2 — Подтверждение живости</div>
+    <p id="livenessInstruction" style="color:var(--muted);font-size:13px;margin-bottom:16px;">Посмотрите в камеру и <b style="color:var(--accent);">моргните</b>.</p>
+
+    <video id="livenessVideo" autoplay playsinline muted
+           style="width:100%;max-width:320px;height:240px;display:block;margin:0 auto;border:2px solid var(--accent);border-radius:10px;background:#000;object-fit:cover;">
+    </video>
+    <canvas id="livenessCanvas" width="320" height="240" style="display:none;"></canvas>
+
+    <div id="livenessStatus" style="margin-top:12px;font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);line-height:1.7;">
+      Кадров обработано: <span id="livenessFrames">0</span>
+      &nbsp;|&nbsp; EAR: <span id="livenessEar">—</span><br>
+      Моргание: <span id="livenessBlink">не зафиксировано</span>
+    </div>
+
+    <div id="livenessResult" style="margin-top:12px;font-weight:700;font-size:13px;"></div>
+  </div>
+
+  <!-- STEP 3 -->
   <div id="otpSection" class="card section-hidden">
-    <div style="font-size:15px;font-weight:800;margin-bottom:6px;">🔑 Шаг 2 — OTP-код</div>
+    <div style="font-size:15px;font-weight:800;margin-bottom:6px;">🔑 Шаг 3 — OTP-код</div>
     <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">Введите 6-значный код из Google Authenticator / Aegis.</p>
 
     <div class="otp-wrap">
@@ -302,12 +321,14 @@ async function verifyFace() {
       document.getElementById('resultSub').textContent = `Сходство: ${sim.toFixed(4)} ≥ порог ${data.threshold}`;
 
       setTimeout(() => {
-        setStep(2);
         document.getElementById('faceSection').style.opacity = '0.5';
         document.getElementById('faceSection').style.pointerEvents = 'none';
-        document.getElementById('otpSection').classList.remove('section-hidden');
-        document.getElementById('otpSection').scrollIntoView({behavior:'smooth'});
-        document.querySelectorAll('.otp-digit')[0].focus();
+
+        if (data.next_step === 'liveness') {
+          startLivenessFlow(data.session_id);
+        } else if (data.session_id) {
+          showOtpForm(data.session_id); // fallback, если liveness выключена на backend
+        }
       }, 700);
     } else {
       resultDiv.className = 'face-result fail';
@@ -317,6 +338,123 @@ async function verifyFace() {
     }
   } catch(e) { alert('Ошибка: ' + e.message); }
   btn.disabled = false; btn.textContent = '🔍 Верифицировать лицо';
+}
+
+// Liveness flow
+let livenessSessionId = null;
+let livenessStream = null;
+let livenessInterval = null;
+
+async function startLivenessFlow(id) {
+  livenessSessionId = id;
+  setStep(2);
+  const section = document.getElementById('livenessSection');
+  section.classList.remove('section-hidden');
+  section.scrollIntoView({behavior:'smooth'});
+
+  try {
+    livenessStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 320, height: 240, facingMode: 'user' },
+      audio: false
+    });
+
+    const video = document.getElementById('livenessVideo');
+    video.srcObject = livenessStream;
+
+    video.onloadedmetadata = () => {
+      if (livenessInterval) clearInterval(livenessInterval);
+      livenessInterval = setInterval(sendLivenessFrame, 200);
+    };
+  } catch (err) {
+    showLivenessResult('error', 'Не удалось открыть камеру: ' + err.message);
+  }
+}
+
+async function sendLivenessFrame() {
+  const video = document.getElementById('livenessVideo');
+  const canvas = document.getElementById('livenessCanvas');
+  const ctx = canvas.getContext('2d');
+
+  if (!video.videoWidth || !video.videoHeight) return;
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  const blob = await new Promise(resolve =>
+    canvas.toBlob(resolve, 'image/jpeg', 0.85)
+  );
+
+  if (!blob) return;
+
+  const formData = new FormData();
+  formData.append('session_id', livenessSessionId);
+  formData.append('file', blob, 'frame.jpg');
+
+  try {
+    const res = await fetch('/api/verify-liveness', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    handleLivenessResponse(data);
+  } catch (err) {
+    console.error('Liveness frame error', err);
+  }
+}
+
+function handleLivenessResponse(data) {
+  if (data.frames !== undefined) {
+    document.getElementById('livenessFrames').textContent = data.frames;
+  }
+  if (data.ear !== undefined) {
+    document.getElementById('livenessEar').textContent = data.ear;
+  }
+  if (data.blink_detected) {
+    document.getElementById('livenessBlink').textContent = '✓ зафиксировано';
+    document.getElementById('livenessBlink').style.color = 'var(--accent3)';
+  }
+
+  if (data.status === 'success') {
+    stopLiveness();
+    showLivenessResult('success', '✓ Живость подтверждена. Теперь введите OTP.');
+    setTimeout(() => showOtpForm(livenessSessionId), 500);
+  } else if (data.status === 'failed') {
+    stopLiveness();
+    const reasons = {
+      'passive_check_failed': 'Обнаружены признаки экрана или печати',
+      'no_blink_detected_in_time': 'Моргание не зафиксировано за отведённое время',
+      'no_face_detected': 'Лицо не обнаружено',
+      'session_not_found': 'Сессия не найдена'
+    };
+    const msg = reasons[data.reason] || data.reason || 'неизвестная ошибка';
+    showLivenessResult('error', '✗ Liveness-проверка не пройдена: ' + msg);
+  }
+}
+
+function stopLiveness() {
+  if (livenessInterval) {
+    clearInterval(livenessInterval);
+    livenessInterval = null;
+  }
+  if (livenessStream) {
+    livenessStream.getTracks().forEach(track => track.stop());
+    livenessStream = null;
+  }
+}
+
+function showLivenessResult(kind, message) {
+  const el = document.getElementById('livenessResult');
+  el.style.color = kind === 'success' ? 'var(--accent3)'
+                 : kind === 'error' ? 'var(--danger)'
+                 : 'var(--muted)';
+  el.textContent = message;
+}
+
+function showOtpForm(id) {
+  sessionId = id;
+  setStep(3);
+  document.getElementById('otpSection').classList.remove('section-hidden');
+  document.getElementById('otpSection').scrollIntoView({behavior:'smooth'});
+  document.querySelectorAll('.otp-digit')[0].focus();
 }
 
 // OTP navigation
@@ -363,9 +501,10 @@ async function verifyOTP() {
     const data = await r.json();
 
     if (data.authenticated) {
-      setStep(3);
+      setStep(4);
       document.getElementById('otpSection').style.display = 'none';
       document.getElementById('faceSection').style.display = 'none';
+      document.getElementById('livenessSection').style.display = 'none';
       const s = document.getElementById('authSuccess');
       s.style.display = 'block';
       document.getElementById('successUser').textContent = `Пользователь: ${data.user_id}`;
