@@ -31,6 +31,7 @@ from liveness import (
     process_liveness_frame,
     end_liveness_session,
     get_liveness_session,
+    reset_liveness_session,
 )
 # ─── Инициализация ──────────────────────────────────────────────────────────
 
@@ -446,7 +447,23 @@ async def verify_liveness(
         end_liveness_session(session_id)
 
     return result
+@app.post("/api/reset-liveness")
+async def reset_liveness(session_id: str = Form(...)):
+    """
+    Кнопка "Попробовать ещё раз" с фронта.
+    Обнуляет состояние liveness-FSM, не трогая саму face-сессию в Supabase.
+    После успеха клиент может снова слать кадры на /api/verify-liveness.
+    """
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(400, "Сессия не найдена или истекла")
+    if time.time() > session['expires_at']:
+        delete_session(session_id)
+        end_liveness_session(session_id)
+        raise HTTPException(400, "Сессия истекла. Начните заново.")
 
+    reset_liveness_session(session_id)
+    return {"status": "ok", "message": "Liveness reset, please blink again"}
 
 @app.post("/api/verify-otp")
 async def verify_otp(

@@ -206,20 +206,44 @@
   <!-- STEP 2 -->
   <div id="livenessSection" class="card section-hidden">
     <div style="font-size:15px;font-weight:800;margin-bottom:6px;">👁️ Шаг 2 — Подтверждение живости</div>
-    <p id="livenessInstruction" style="color:var(--muted);font-size:13px;margin-bottom:16px;">Посмотрите в камеру и <b style="color:var(--accent);">моргните</b>.</p>
+    <p id="livenessInstruction" style="font-size:18px;color:var(--accent);margin-bottom:12px;">
+      Посмотрите в камеру с открытыми глазами…
+    </p>
 
     <video id="livenessVideo" autoplay playsinline muted
-           style="width:100%;max-width:320px;height:240px;display:block;margin:0 auto;border:2px solid var(--accent);border-radius:10px;background:#000;object-fit:cover;">
+           style="width:100%;max-width:480px;height:360px;display:block;margin:0 auto;border:2px solid var(--accent);
+                  border-radius:10px;background:#000;object-fit:cover;">
     </video>
-    <canvas id="livenessCanvas" width="320" height="240" style="display:none;"></canvas>
+    <canvas id="livenessCanvas" width="480" height="360" style="display:none;"></canvas>
 
-    <div id="livenessStatus" style="margin-top:12px;font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);line-height:1.7;">
-      Кадров обработано: <span id="livenessFrames">0</span>
-      &nbsp;|&nbsp; EAR: <span id="livenessEar">—</span><br>
-      Моргание: <span id="livenessBlink">не зафиксировано</span>
+    <!-- Прогресс-бар -->
+    <div style="width:100%;max-width:480px;height:8px;background:var(--surface2);
+                border-radius:4px;margin:10px auto 0;overflow:hidden;">
+      <div id="livenessProgress" style="height:100%;width:0%;
+           background:linear-gradient(90deg,var(--accent),var(--accent3));transition:width 0.2s;"></div>
     </div>
 
+    <!-- Debug-панель -->
+    <details style="margin-top:12px;" open>
+      <summary style="cursor:pointer;user-select:none;color:var(--muted);font-size:13px;">
+        Технические показатели
+      </summary>
+      <div style="font-family:'Space Mono',monospace;font-size:12px;margin-top:8px;
+                  background:var(--surface2);padding:12px;border-radius:8px;color:var(--muted);line-height:1.7;">
+        <div>Кадров с лицом: <span id="dbgFrames">0</span></div>
+        <div>EAR текущий: <span id="dbgEar">—</span></div>
+        <div>EAR baseline: <span id="dbgBaseline">—</span></div>
+        <div>Статус: <span id="dbgStatus">ожидание…</span></div>
+        <div>EAR history: <span id="dbgHistory">—</span></div>
+      </div>
+    </details>
+
     <div id="livenessResult" style="margin-top:12px;font-weight:700;font-size:13px;"></div>
+
+    <button id="livenessRetryBtn" type="button" onclick="retryLiveness()"
+            class="btn" style="display:none;background:linear-gradient(135deg,var(--warning),#d97706);color:#000;margin-top:12px;">
+      🔄 Попробовать ещё раз
+    </button>
   </div>
 
   <!-- STEP 3 -->
@@ -340,21 +364,41 @@ async function verifyFace() {
   btn.disabled = false; btn.textContent = '🔍 Верифицировать лицо';
 }
 
-// Liveness flow
+// Liveness flow — версия 2
 let livenessSessionId = null;
 let livenessStream = null;
 let livenessInterval = null;
+const MAX_FRAMES = 25;        // должно совпадать с MAX_FACE_FRAMES в liveness.py
+const FRAME_INTERVAL_MS = 300;
 
 async function startLivenessFlow(id) {
   livenessSessionId = id;
-  setStep(2);
+
   const section = document.getElementById('livenessSection');
   section.classList.remove('section-hidden');
+  section.style.display = 'block';
+
+  document.getElementById('livenessResult').textContent = '';
+  document.getElementById('livenessRetryBtn').style.display = 'none';
+  document.getElementById('livenessProgress').style.width = '0%';
+  document.getElementById('dbgFrames').textContent = '0';
+  document.getElementById('dbgEar').textContent = '—';
+  document.getElementById('dbgBaseline').textContent = '—';
+  document.getElementById('dbgStatus').textContent = 'ожидание…';
+  document.getElementById('dbgHistory').textContent = '—';
+
+  const instr = document.getElementById('livenessInstruction');
+  instr.textContent = 'Посмотрите в камеру с открытыми глазами…';
+  instr.style.color = 'var(--accent)';
+
+  setStep(2);
   section.scrollIntoView({behavior:'smooth'});
 
   try {
+    stopLiveness();
+
     livenessStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 320, height: 240, facingMode: 'user' },
+      video: { width: 640, height: 480, facingMode: 'user' },
       audio: false
     });
 
@@ -363,7 +407,7 @@ async function startLivenessFlow(id) {
 
     video.onloadedmetadata = () => {
       if (livenessInterval) clearInterval(livenessInterval);
-      livenessInterval = setInterval(sendLivenessFrame, 200);
+      livenessInterval = setInterval(sendLivenessFrame, FRAME_INTERVAL_MS);
     };
   } catch (err) {
     showLivenessResult('error', 'Не удалось открыть камеру: ' + err.message);
@@ -402,31 +446,104 @@ async function sendLivenessFrame() {
 }
 
 function handleLivenessResponse(data) {
-  if (data.frames !== undefined) {
-    document.getElementById('livenessFrames').textContent = data.frames;
-  }
-  if (data.ear !== undefined) {
-    document.getElementById('livenessEar').textContent = data.ear;
-  }
-  if (data.blink_detected) {
-    document.getElementById('livenessBlink').textContent = '✓ зафиксировано';
-    document.getElementById('livenessBlink').style.color = 'var(--accent3)';
+  // Обновляем debug-панель
+  if (data.frames_with_face !== undefined) {
+    document.getElementById('dbgFrames').textContent = data.frames_with_face;
+    const pct = Math.min(100, (data.frames_with_face / MAX_FRAMES) * 100);
+    document.getElementById('livenessProgress').style.width = pct + '%';
   }
 
-  if (data.status === 'success') {
+  // Fallback для старого backend, если он всё ещё отдаёт data.frames
+  if (data.frames !== undefined && data.frames_with_face === undefined) {
+    document.getElementById('dbgFrames').textContent = data.frames;
+  }
+
+  if (data.ear !== undefined) {
+    document.getElementById('dbgEar').textContent = data.ear;
+  }
+
+  if (data.baseline !== undefined && data.baseline > 0) {
+    document.getElementById('dbgBaseline').textContent = data.baseline;
+  }
+
+  if (data.ear_history) {
+    document.getElementById('dbgHistory').textContent =
+      data.ear_history.slice(-10).join(', ');
+  }
+
+  const instr = document.getElementById('livenessInstruction');
+  const dbgStatus = document.getElementById('dbgStatus');
+
+  if (data.status === 'pending') {
+    if (data.reason === 'no_face_in_frame') {
+      instr.textContent = 'Лицо не видно в камере. Подойдите ближе и держитесь по центру.';
+      instr.style.color = 'var(--warning)';
+      dbgStatus.textContent = 'нет лица';
+    } else if (data.calibrating) {
+      instr.textContent = 'Калибровка… смотрите прямо в камеру с открытыми глазами.';
+      instr.style.color = 'var(--accent)';
+      dbgStatus.textContent = 'калибровка';
+    } else if (data.saw_closed) {
+      instr.textContent = '✓ Закрытие глаз зафиксировано — теперь снова откройте глаза.';
+      instr.style.color = 'var(--accent3)';
+      dbgStatus.textContent = 'ждём открытия глаз';
+    } else {
+      instr.textContent = 'А теперь моргните 1–2 раза.';
+      instr.style.color = 'var(--accent)';
+      dbgStatus.textContent = 'ждём моргание';
+    }
+  } else if (data.status === 'success') {
     stopLiveness();
-    showLivenessResult('success', '✓ Живость подтверждена. Теперь введите OTP.');
+    instr.textContent = '✓ Живость подтверждена.';
+    instr.style.color = 'var(--accent3)';
+    dbgStatus.textContent = 'успех';
+    showLivenessResult('success', '✓ Готово. Введите OTP-код из приложения.');
     setTimeout(() => showOtpForm(livenessSessionId), 500);
   } else if (data.status === 'failed') {
     stopLiveness();
+
     const reasons = {
-      'passive_check_failed': 'Обнаружены признаки экрана или печати',
-      'no_blink_detected_in_time': 'Моргание не зафиксировано за отведённое время',
-      'no_face_detected': 'Лицо не обнаружено',
-      'session_not_found': 'Сессия не найдена'
+      'passive_check_failed': 'Изображение похоже на экран или печать.',
+      'no_blink_detected_in_time': 'Моргание не зафиксировано за отведённое время.',
+      'no_face_detected': 'Лицо не обнаружено. Проверьте освещение.',
+      'session_not_found': 'Сессия истекла, пройдите верификацию лица заново.'
     };
+
     const msg = reasons[data.reason] || data.reason || 'неизвестная ошибка';
-    showLivenessResult('error', '✗ Liveness-проверка не пройдена: ' + msg);
+    showLivenessResult('error', '✗ ' + msg);
+    dbgStatus.textContent = 'провал: ' + (data.reason || 'unknown');
+
+    if (data.reason !== 'session_not_found') {
+      document.getElementById('livenessRetryBtn').style.display = 'block';
+    }
+  }
+}
+
+async function retryLiveness() {
+  document.getElementById('livenessRetryBtn').style.display = 'none';
+  document.getElementById('livenessResult').textContent = '';
+  document.getElementById('dbgStatus').textContent = 'сброс…';
+
+  try {
+    stopLiveness();
+
+    const formData = new FormData();
+    formData.append('session_id', livenessSessionId);
+
+    const res = await fetch('/api/reset-liveness', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!res.ok) {
+      const txt = await res.text();
+      showLivenessResult('error', 'Сброс не удался: ' + txt);
+      return;
+    }
+
+    startLivenessFlow(livenessSessionId);
+  } catch (err) {
+    showLivenessResult('error', 'Сброс не удался: ' + err.message);
   }
 }
 
@@ -435,6 +552,7 @@ function stopLiveness() {
     clearInterval(livenessInterval);
     livenessInterval = null;
   }
+
   if (livenessStream) {
     livenessStream.getTracks().forEach(track => track.stop());
     livenessStream = null;
