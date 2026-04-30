@@ -70,25 +70,10 @@
   .btn-otp:hover{opacity:0.9;transform:translateY(-1px);}
   .btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
 
-  /* ── OTP INPUT — FIXED SIZE ── */
+  /* OTP INPUT */
   .otp-wrap{margin:14px 0;}
   .otp-input-row{display:flex;gap:8px;justify-content:center;}
-  .otp-digit{
-    width:44px; height:52px;
-    text-align:center;
-    background:var(--surface2);
-    border:2px solid var(--border);
-    border-radius:10px;
-    color:var(--text);
-    font-size:22px;
-    font-family:'Space Mono',monospace;
-    font-weight:700;
-    outline:none;
-    transition:border-color 0.2s;
-    /* Prevent mobile zoom */
-    font-size:22px;
-    -webkit-text-size-adjust:none;
-  }
+  .otp-digit{width:44px;height:52px;text-align:center;background:var(--surface2);border:2px solid var(--border);border-radius:10px;color:var(--text);font-size:22px;font-family:'Space Mono',monospace;font-weight:700;outline:none;transition:border-color 0.2s;-webkit-text-size-adjust:none;}
   .otp-digit:focus{border-color:var(--accent2);}
   @media(max-width:380px){
     .otp-digit{width:38px;height:46px;font-size:18px;gap:6px;}
@@ -119,6 +104,11 @@
 
   .section-hidden{display:none;}
   .attempts-badge{display:inline-block;padding:4px 10px;background:rgba(245,158,11,0.12);border-radius:100px;font-size:12px;color:var(--warning);font-family:'Space Mono',monospace;margin-top:8px;}
+
+  /* Liveness instruction colors */
+  .live-instr-info{color:var(--accent);}
+  .live-instr-warn{color:var(--warning);}
+  .live-instr-ok{color:var(--accent3);}
 </style>
 </head>
 <body>
@@ -206,7 +196,7 @@
   <!-- STEP 2 -->
   <div id="livenessSection" class="card section-hidden">
     <div style="font-size:15px;font-weight:800;margin-bottom:6px;">👁️ Шаг 2 — Подтверждение живости</div>
-    <p id="livenessInstruction" style="font-size:18px;color:var(--accent);margin-bottom:12px;">
+    <p id="livenessInstruction" class="live-instr-info" style="font-size:18px;margin-bottom:12px;">
       Посмотрите в камеру с открытыми глазами…
     </p>
 
@@ -285,15 +275,54 @@
 </div>
 
 <script>
+// =====================================================================
+// Глобальное состояние
+// =====================================================================
 let sessionId = null;
 let faceSimilarity = 0;
 let selectedFile = null;
+
+let livenessSessionId = null;
+let livenessStream = null;
+let livenessInterval = null;
+
+const MAX_FRAMES = 25;
+const FRAME_INTERVAL_MS = 300;
+
+// =====================================================================
+// Stepper helpers
+// =====================================================================
+function setStep(step) {
+  // step: 1 | 2 | 3 | 'done'
+  const circles = ['step1circle', 'step2circle', 'step3circle']
+    .map(id => document.getElementById(id));
+  const labels = ['step1label', 'step2label', 'step3label']
+    .map(id => document.getElementById(id));
+
+  circles.forEach((c, i) => {
+    c.classList.remove('active', 'done');
+    labels[i].classList.remove('active', 'done');
+    if (step === 'done' || (typeof step === 'number' && i + 1 < step)) {
+      c.classList.add('done');
+      labels[i].classList.add('done');
+      c.textContent = '✓';
+    } else if (typeof step === 'number' && i + 1 === step) {
+      c.classList.add('active');
+      labels[i].classList.add('active');
+      c.textContent = String(i + 1);
+    } else {
+      c.textContent = String(i + 1);
+    }
+  });
+}
 
 function toggleNav() {
   document.getElementById('mainNav').classList.toggle('open');
 }
 
-// File handling
+// =====================================================================
+// File handling — Step 1
+// =====================================================================
 const dropzone = document.getElementById('dropzone');
 dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
@@ -349,9 +378,11 @@ async function verifyFace() {
         document.getElementById('faceSection').style.pointerEvents = 'none';
 
         if (data.next_step === 'liveness') {
+          setStep(2);
           startLivenessFlow(data.session_id);
         } else if (data.session_id) {
-          showOtpForm(data.session_id); // fallback, если liveness выключена на backend
+          setStep(3);
+          showOtpForm(data.session_id);
         }
       }, 700);
     } else {
@@ -364,49 +395,39 @@ async function verifyFace() {
   btn.disabled = false; btn.textContent = '🔍 Верифицировать лицо';
 }
 
-// Liveness flow — версия 2
-let livenessSessionId = null;
-let livenessStream = null;
-let livenessInterval = null;
-const MAX_FRAMES = 25;        // должно совпадать с MAX_FACE_FRAMES в liveness.py
-const FRAME_INTERVAL_MS = 300;
+// =====================================================================
+// LIVENESS — Step 2
+// =====================================================================
 
-async function startLivenessFlow(id) {
-  livenessSessionId = id;
-
+async function startLivenessFlow(sid) {
+  livenessSessionId = sid;
   const section = document.getElementById('livenessSection');
   section.classList.remove('section-hidden');
-  section.style.display = 'block';
-
   document.getElementById('livenessResult').textContent = '';
   document.getElementById('livenessRetryBtn').style.display = 'none';
-  document.getElementById('livenessProgress').style.width = '0%';
+
+  const instr = document.getElementById('livenessInstruction');
+  instr.className = 'live-instr-info';
+  instr.style.fontSize = '18px';
+  instr.style.marginBottom = '12px';
+  instr.textContent = 'Посмотрите в камеру с открытыми глазами…';
+
+  // Сброс debug-панели
   document.getElementById('dbgFrames').textContent = '0';
   document.getElementById('dbgEar').textContent = '—';
   document.getElementById('dbgBaseline').textContent = '—';
-  document.getElementById('dbgStatus').textContent = 'ожидание…';
+  document.getElementById('dbgStatus').textContent = 'старт';
   document.getElementById('dbgHistory').textContent = '—';
-
-  const instr = document.getElementById('livenessInstruction');
-  instr.textContent = 'Посмотрите в камеру с открытыми глазами…';
-  instr.style.color = 'var(--accent)';
-
-  setStep(2);
-  section.scrollIntoView({behavior:'smooth'});
+  document.getElementById('livenessProgress').style.width = '0%';
 
   try {
-    stopLiveness();
-
     livenessStream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480, facingMode: 'user' },
       audio: false
     });
-
     const video = document.getElementById('livenessVideo');
     video.srcObject = livenessStream;
-
     video.onloadedmetadata = () => {
-      if (livenessInterval) clearInterval(livenessInterval);
       livenessInterval = setInterval(sendLivenessFrame, FRAME_INTERVAL_MS);
     };
   } catch (err) {
@@ -415,19 +436,16 @@ async function startLivenessFlow(id) {
 }
 
 async function sendLivenessFrame() {
+  if (!livenessSessionId) { stopLiveness(); return; }
+
   const video = document.getElementById('livenessVideo');
   const canvas = document.getElementById('livenessCanvas');
   const ctx = canvas.getContext('2d');
-
-  if (!video.videoWidth || !video.videoHeight) return;
-
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
   const blob = await new Promise(resolve =>
     canvas.toBlob(resolve, 'image/jpeg', 0.85)
   );
-
-  if (!blob) return;
 
   const formData = new FormData();
   formData.append('session_id', livenessSessionId);
@@ -438,34 +456,39 @@ async function sendLivenessFrame() {
       method: 'POST',
       body: formData
     });
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error('Liveness HTTP error', res.status, txt);
+      stopLiveness();
+      showLivenessResult('error', 'Ошибка сервера: ' + res.status);
+      return;
+    }
     const data = await res.json();
     handleLivenessResponse(data);
   } catch (err) {
-    console.error('Liveness frame error', err);
+    console.error('Liveness frame fetch error', err);
   }
 }
 
 function handleLivenessResponse(data) {
-  // Обновляем debug-панель
+  // Особый случай — face-сессия закончилась
+  if (data.status === 'session_expired' || data.session_expired === true) {
+    handleSessionExpired(data.reason || 'session_expired');
+    return;
+  }
+
+  // Debug
   if (data.frames_with_face !== undefined) {
     document.getElementById('dbgFrames').textContent = data.frames_with_face;
     const pct = Math.min(100, (data.frames_with_face / MAX_FRAMES) * 100);
     document.getElementById('livenessProgress').style.width = pct + '%';
   }
-
-  // Fallback для старого backend, если он всё ещё отдаёт data.frames
-  if (data.frames !== undefined && data.frames_with_face === undefined) {
-    document.getElementById('dbgFrames').textContent = data.frames;
-  }
-
   if (data.ear !== undefined) {
     document.getElementById('dbgEar').textContent = data.ear;
   }
-
   if (data.baseline !== undefined && data.baseline > 0) {
     document.getElementById('dbgBaseline').textContent = data.baseline;
   }
-
   if (data.ear_history) {
     document.getElementById('dbgHistory').textContent =
       data.ear_history.slice(-10).join(', ');
@@ -476,136 +499,151 @@ function handleLivenessResponse(data) {
 
   if (data.status === 'pending') {
     if (data.reason === 'no_face_in_frame') {
-      instr.textContent = 'Лицо не видно в камере. Подойдите ближе и держитесь по центру.';
-      instr.style.color = 'var(--warning)';
+      instr.textContent = 'Лицо не видно. Подойдите ближе и держитесь по центру.';
+      instr.className = 'live-instr-warn';
       dbgStatus.textContent = 'нет лица';
     } else if (data.calibrating) {
-      instr.textContent = 'Калибровка… смотрите прямо в камеру с открытыми глазами.';
-      instr.style.color = 'var(--accent)';
+      instr.textContent = 'Калибровка… смотрите прямо в камеру.';
+      instr.className = 'live-instr-info';
       dbgStatus.textContent = 'калибровка';
     } else if (data.saw_closed) {
-      instr.textContent = '✓ Закрытие глаз зафиксировано — теперь снова откройте глаза.';
-      instr.style.color = 'var(--accent3)';
-      dbgStatus.textContent = 'ждём открытия глаз';
+      instr.textContent = '✓ Закрытие зафиксировано — теперь снова откройте глаза.';
+      instr.className = 'live-instr-ok';
+      dbgStatus.textContent = 'ждём открытия';
     } else {
-      instr.textContent = 'А теперь моргните 1–2 раза.';
-      instr.style.color = 'var(--accent)';
+      instr.textContent = 'А теперь моргните 1-2 раза.';
+      instr.className = 'live-instr-info';
       dbgStatus.textContent = 'ждём моргание';
     }
   } else if (data.status === 'success') {
     stopLiveness();
     instr.textContent = '✓ Живость подтверждена.';
-    instr.style.color = 'var(--accent3)';
+    instr.className = 'live-instr-ok';
     dbgStatus.textContent = 'успех';
-    showLivenessResult('success', '✓ Готово. Введите OTP-код из приложения.');
-    setTimeout(() => showOtpForm(livenessSessionId), 500);
+    showLivenessResult('success', '✓ Готово. Введите OTP-код.');
+    setStep(3);
+    setTimeout(() => {
+      document.getElementById('livenessSection').style.opacity = '0.5';
+      document.getElementById('livenessSection').style.pointerEvents = 'none';
+      showOtpForm(livenessSessionId);
+    }, 600);
   } else if (data.status === 'failed') {
     stopLiveness();
-
     const reasons = {
       'passive_check_failed': 'Изображение похоже на экран или печать.',
       'no_blink_detected_in_time': 'Моргание не зафиксировано за отведённое время.',
       'no_face_detected': 'Лицо не обнаружено. Проверьте освещение.',
-      'session_not_found': 'Сессия истекла, пройдите верификацию лица заново.'
+      'session_not_found': 'Сессия истекла. Загрузите фото лица заново.',
     };
-
-    const msg = reasons[data.reason] || data.reason || 'неизвестная ошибка';
+    const msg = reasons[data.reason] || data.reason;
     showLivenessResult('error', '✗ ' + msg);
     dbgStatus.textContent = 'провал: ' + (data.reason || 'unknown');
-
-    if (data.reason !== 'session_not_found') {
-      document.getElementById('livenessRetryBtn').style.display = 'block';
-    }
+    document.getElementById('livenessRetryBtn').style.display = 'block';
   }
 }
 
+function handleSessionExpired(reason) {
+  stopLiveness();
+  livenessSessionId = null;
+  sessionId = null;
+
+  document.getElementById('livenessSection').classList.add('section-hidden');
+  document.getElementById('otpSection').classList.add('section-hidden');
+
+  // Снова открываем шаг 1
+  const face = document.getElementById('faceSection');
+  face.style.opacity = '1';
+  face.style.pointerEvents = '';
+
+  setStep(1);
+
+  const reasonText = {
+    'face_session_not_found': 'Сессия не найдена. Загрузите фото лица заново.',
+    'face_session_timeout': 'Прошло более 5 минут. Загрузите фото лица заново.',
+    'session_expired': 'Сессия истекла. Загрузите фото лица заново.',
+  }[reason] || 'Сессия истекла. Загрузите фото лица заново.';
+
+  alert(reasonText);
+}
+
 async function retryLiveness() {
+  if (!livenessSessionId) {
+    handleSessionExpired('session_expired');
+    return;
+  }
   document.getElementById('livenessRetryBtn').style.display = 'none';
   document.getElementById('livenessResult').textContent = '';
   document.getElementById('dbgStatus').textContent = 'сброс…';
 
   try {
-    stopLiveness();
+    const fd = new FormData();
+    fd.append('session_id', livenessSessionId);
+    const res = await fetch('/api/reset-liveness', { method:'POST', body:fd });
+    const data = await res.json();
 
-    const formData = new FormData();
-    formData.append('session_id', livenessSessionId);
-
-    const res = await fetch('/api/reset-liveness', {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!res.ok) {
-      const txt = await res.text();
-      showLivenessResult('error', 'Сброс не удался: ' + txt);
+    if (data.status === 'session_expired') {
+      handleSessionExpired(data.reason || 'session_expired');
       return;
     }
-
+    if (data.status !== 'ok') {
+      showLivenessResult('error', 'Сброс не удался');
+      document.getElementById('livenessRetryBtn').style.display = 'block';
+      return;
+    }
     startLivenessFlow(livenessSessionId);
   } catch (err) {
     showLivenessResult('error', 'Сброс не удался: ' + err.message);
+    document.getElementById('livenessRetryBtn').style.display = 'block';
   }
 }
 
 function stopLiveness() {
-  if (livenessInterval) {
-    clearInterval(livenessInterval);
-    livenessInterval = null;
-  }
-
-  if (livenessStream) {
-    livenessStream.getTracks().forEach(track => track.stop());
-    livenessStream = null;
-  }
+  if (livenessInterval) { clearInterval(livenessInterval); livenessInterval = null; }
+  if (livenessStream) { livenessStream.getTracks().forEach(t => t.stop()); livenessStream = null; }
 }
 
 function showLivenessResult(kind, message) {
   const el = document.getElementById('livenessResult');
-  el.style.color = kind === 'success' ? 'var(--accent3)'
-                 : kind === 'error' ? 'var(--danger)'
-                 : 'var(--muted)';
+  el.style.color = (kind === 'success') ? 'var(--accent3)' :
+                   (kind === 'error')   ? 'var(--danger)' : 'var(--text)';
   el.textContent = message;
 }
 
-function showOtpForm(id) {
-  sessionId = id;
-  setStep(3);
+// =====================================================================
+// OTP — Step 3
+// =====================================================================
+
+function showOtpForm(sid) {
+  sessionId = sid;
   document.getElementById('otpSection').classList.remove('section-hidden');
-  document.getElementById('otpSection').scrollIntoView({behavior:'smooth'});
-  document.querySelectorAll('.otp-digit')[0].focus();
+  // Фокус на первом инпуте OTP
+  const first = document.querySelector('#otpInputs .otp-digit');
+  if (first) first.focus();
 }
 
-// OTP navigation
-document.querySelectorAll('.otp-digit').forEach((input, idx, all) => {
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Backspace') {
-      if (input.value) { input.value = ''; }
-      else if (idx > 0) { all[idx-1].focus(); all[idx-1].value = ''; }
-      e.preventDefault();
-    }
+// Auto-advance + paste handling для 6-значного OTP
+const otpInputs = document.querySelectorAll('#otpInputs .otp-digit');
+otpInputs.forEach((inp, i) => {
+  inp.addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0,1);
+    if (e.target.value && i < otpInputs.length - 1) otpInputs[i+1].focus();
+  });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Backspace' && !e.target.value && i > 0) otpInputs[i-1].focus();
     if (e.key === 'Enter') verifyOTP();
   });
-  input.addEventListener('input', () => {
-    input.value = input.value.replace(/\D/g,'').slice(-1);
-    if (input.value && idx < all.length - 1) all[idx+1].focus();
-    // Auto-submit when all filled
-    const code = [...all].map(i => i.value).join('');
-    if (code.length === 6) verifyOTP();
-  });
-  // Handle paste
-  input.addEventListener('paste', e => {
+  inp.addEventListener('paste', e => {
     e.preventDefault();
-    const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g,'');
-    [...all].forEach((el, i) => { el.value = text[i] || ''; });
-    if (text.length >= 6) verifyOTP();
-    else all[Math.min(text.length, 5)].focus();
+    const data = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g,'').slice(0,6);
+    [...data].forEach((d, k) => { if (otpInputs[k]) otpInputs[k].value = d; });
+    if (otpInputs[Math.min(data.length, 5)]) otpInputs[Math.min(data.length, 5)].focus();
   });
 });
 
 async function verifyOTP() {
-  const digits = [...document.querySelectorAll('.otp-digit')].map(i => i.value);
-  const code = digits.join('');
-  if (code.length !== 6) return;
+  if (!sessionId) return alert('Сначала пройдите шаги 1 и 2');
+  const code = [...otpInputs].map(i => i.value).join('');
+  if (code.length !== 6) return alert('Введите 6 цифр');
 
   const btn = document.getElementById('otpBtn');
   btn.disabled = true; btn.textContent = '⏳ Проверяю...';
@@ -619,40 +657,28 @@ async function verifyOTP() {
     const data = await r.json();
 
     if (data.authenticated) {
-      setStep(4);
-      document.getElementById('otpSection').style.display = 'none';
+      setStep('done');
       document.getElementById('faceSection').style.display = 'none';
       document.getElementById('livenessSection').style.display = 'none';
-      const s = document.getElementById('authSuccess');
-      s.style.display = 'block';
-      document.getElementById('successUser').textContent = `Пользователь: ${data.user_id}`;
-      document.getElementById('metaSim').textContent = faceSimilarity.toFixed(4);
-      s.scrollIntoView({behavior:'smooth'});
+      document.getElementById('otpSection').style.display = 'none';
+      const success = document.getElementById('authSuccess');
+      success.style.display = 'block';
+      document.getElementById('successUser').textContent = data.user_id || '';
+      document.getElementById('metaSim').textContent =
+        (data.face_similarity || faceSimilarity).toFixed(4);
     } else {
-      const info = document.getElementById('attemptsInfo');
-      if (data.attempts_left !== undefined) {
-        info.style.display = 'inline-block';
-        info.textContent = `Неверный код. Осталось: ${data.attempts_left}`;
+      const left = data.attempts_left;
+      if (left !== undefined && left >= 0) {
+        const ai = document.getElementById('attemptsInfo');
+        ai.style.display = 'inline-block';
+        ai.textContent = `Осталось попыток: ${left}`;
       }
-      if (data.attempts_left === 0 || data.error) {
-        alert(data.error || 'Все попытки исчерпаны. Начните заново.');
-        location.reload();
-        return;
-      }
-      document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
-      document.querySelectorAll('.otp-digit')[0].focus();
+      alert(data.message || data.error || 'Неверный код');
+      otpInputs.forEach(i => i.value = '');
+      otpInputs[0].focus();
     }
   } catch(e) { alert('Ошибка: ' + e.message); }
   btn.disabled = false; btn.textContent = '✓ Подтвердить OTP';
-}
-
-function setStep(n) {
-  ['step1','step2','step3'].forEach((id, i) => {
-    const c = document.getElementById(id+'circle');
-    const l = document.getElementById(id+'label');
-    c.className = 'step-circle' + (i+1 < n ? ' done' : i+1 === n ? ' active' : '');
-    l.className = 'step-label' + (i+1 < n ? ' done' : i+1 === n ? ' active' : '');
-  });
 }
 </script>
 </body>

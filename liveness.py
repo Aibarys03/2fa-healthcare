@@ -122,6 +122,10 @@ class LivenessSession:
     passive_passed: bool = True   # по умолчанию True (если passive выключено)
     passive_details: dict = field(default_factory=dict)
 
+    # Счётчик неудачных попыток подряд (используется в app.py для решения,
+    # удалять face-сессию или дать ещё один шанс)
+    fail_count: int = 0
+
 
 _live_sessions: dict[str, LivenessSession] = {}
 
@@ -255,8 +259,15 @@ def end_liveness_session(session_id: str) -> None:
 
 
 def reset_liveness_session(session_id: str) -> LivenessSession:
-    """Кнопка 'попробовать ещё раз' с фронта — обнуляем состояние."""
-    return start_liveness_session(session_id)
+    """
+    Кнопка 'попробовать ещё раз' с фронта — обнуляем FSM, но сохраняем
+    fail_count чтобы лимит попыток продолжал работать.
+    """
+    old = _live_sessions.get(session_id)
+    preserved_fails = getattr(old, "fail_count", 0) if old else 0
+    new_session = start_liveness_session(session_id)
+    new_session.fail_count = preserved_fails
+    return new_session
 
 
 def process_liveness_frame(session_id: str, image: Image.Image) -> dict:

@@ -17,7 +17,7 @@ from model import FaceEmbeddingNet
 
 IMG_SIZE = 100
 EMBEDDING_DIM = 128
-DEFAULT_THRESHOLD = 0.70
+DEFAULT_THRESHOLD = 0.80
 
 
 class FaceVerifier:

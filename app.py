@@ -408,62 +408,68 @@ async def verify_face(
 
 @app.post("/api/verify-liveness")
 async def verify_liveness(
-        session_id: str = Form(...),
-        file: UploadFile = File(...)
+    session_id: str = Form(...),
+    file: UploadFile = File(...)
 ):
-    """
-    Принимает один кадр от клиента. Клиент шлёт кадры с интервалом ~200 мс
-    до тех пор, пока не получит status="success" или status="failed".
-
-    Состояния:
-      pending  — продолжайте присылать кадры
-      success  — живость подтверждена, можно вводить OTP
-      failed   — атака обнаружена либо тайм-аут
-    """
-    # Проверяем, что face-сессия ещё жива
     session = get_session(session_id)
     if not session:
-        raise HTTPException(400, "Сессия не найдена или истекла")
+        # Сессия удалена либо никогда не существовала.
+        # НЕ кидаем 400 — отдаём структурный ответ, фронт сам решит.
+        end_liveness_session(session_id)
+        return {"status": "session_expired",
+                "reason": "face_session_not_found"}
+
     if time.time() > session['expires_at']:
         delete_session(session_id)
         end_liveness_session(session_id)
-        raise HTTPException(400, "Сессия истекла. Начните заново.")
+        return {"status": "session_expired",
+                "reason": "face_session_timeout"}
 
-    # Обрабатываем кадр
     content = await file.read()
     image = image_from_upload(content)
     result = process_liveness_frame(session_id, image)
 
     if result["status"] == "failed":
-        # Атака или тайм-аут — закрываем сессию и логируем
-        log_auth(
-            session['user_id'],
-            session['face_similarity'],
-            face_ok=True,  # лицо-то было верифицировано
-            otp_ok=False,
-            success=False,
-        )
-        delete_session(session_id)
-        end_liveness_session(session_id)
+        # Считаем сколько раз подряд проваливалась liveness
+        live = get_liveness_session(session_id)
+        # liveness-сессия уже могла быть стёрта внутри process_liveness_frame,
+        # поэтому проверяем
+        if live is None or getattr(live, "fail_count", 0) >= 2:
+            # Третий провал подряд — закрываем всё и заставляем начать заново
+            log_auth(session['user_id'], session['face_similarity'],
+                     face_ok=True, otp_ok=False, success=False)
+            delete_session(session_id)
+            end_liveness_session(session_id)
+            result["session_expired"] = True
+        else:
+            # Только что упало — сохраняем счётчик, НЕ удаляем face-сессию
+            if live is not None:
+                live.fail_count = getattr(live, "fail_count", 0) + 1
 
     return result
 @app.post("/api/reset-liveness")
 async def reset_liveness(session_id: str = Form(...)):
     """
-    Кнопка "Попробовать ещё раз" с фронта.
-    Обнуляет состояние liveness-FSM, не трогая саму face-сессию в Supabase.
-    После успеха клиент может снова слать кадры на /api/verify-liveness.
+    Кнопка 'Попробовать ещё раз' с фронта.
+    Если face-сессия ещё жива — обнуляем liveness-FSM.
+    Если face-сессия уже истекла — отдаём session_expired
+    (фронт перезагрузит UI, попросит снова сфотографироваться).
     """
     session = get_session(session_id)
     if not session:
-        raise HTTPException(400, "Сессия не найдена или истекла")
+        end_liveness_session(session_id)
+        return {"status": "session_expired",
+                "reason": "face_session_not_found"}
+
     if time.time() > session['expires_at']:
         delete_session(session_id)
         end_liveness_session(session_id)
-        raise HTTPException(400, "Сессия истекла. Начните заново.")
+        return {"status": "session_expired",
+                "reason": "face_session_timeout"}
 
     reset_liveness_session(session_id)
-    return {"status": "ok", "message": "Liveness reset, please blink again"}
+    return {"status": "ok",
+            "message": "Liveness reset, please blink again"}
 
 @app.post("/api/verify-otp")
 async def verify_otp(
