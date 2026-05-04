@@ -125,6 +125,7 @@ class LivenessSession:
     # Счётчик неудачных попыток подряд (используется в app.py для решения,
     # удалять face-сессию или дать ещё один шанс)
     fail_count: int = 0
+    last_open_frame_pil: Optional["Image.Image"] = None
 
 
 _live_sessions: dict[str, LivenessSession] = {}
@@ -314,6 +315,7 @@ def process_liveness_frame(session_id: str, image: Image.Image) -> dict:
 
     # Готово
     if session.blink_detected and session.passive_passed:
+        session.last_open_frame_pil = image.copy()
         return {
             "status": "success",
             "ear": round(ear, 3),
@@ -321,7 +323,6 @@ def process_liveness_frame(session_id: str, image: Image.Image) -> dict:
             "frames_with_face": session.frames_with_face,
             "ear_history": [round(v, 3) for v in session.ear_history],
         }
-
     # Тайм-аут
     if session.frames_with_face >= MAX_FACE_FRAMES:
         return {

@@ -19,3 +19,4 @@ python-dotenv==1.0.1
 mediapipe==0.10.14
 scipy==1.13.1
 scikit-image==0.24.0
+cryptography==42.0.5

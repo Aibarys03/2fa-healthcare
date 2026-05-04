@@ -43,7 +43,7 @@ EMBEDDING_DIM = 128
 BATCH_SIZE = 8
 LEARNING_RATE = 0.001
 MARGIN = 0.3
-VERIFICATION_THRESHOLD = 0.80
+VERIFICATION_THRESHOLD = 0.70
 
 VAL_FRACTION = 0.25       # 25% фото каждого пользователя — на валидацию
 VAL_SAMPLE_PAIRS = 200    # сколько пар (genuine + impostor) на оценку
@@ -109,6 +109,43 @@ class TripletFaceDataset(Dataset):
                 "Нужно минимум 2 пользователя с ≥4 фото для обучения!"
             )
 
+        # Диагностика: ищем дубликаты файлов между папками
+        # (один и тот же файл в разных user-папках → triplet loss взрывается)
+        self._check_for_duplicates()
+
+    def _check_for_duplicates(self):
+        """
+        Проверяет, не встречаются ли одинаковые файлы (по содержимому)
+        в разных папках пользователей. Это критическая ошибка датасета.
+        """
+        import hashlib
+        file_hashes = {}  # hash → (user_id, path)
+        duplicates_found = []
+
+        for user_id, paths in self.train_images.items():
+            for p in paths:
+                try:
+                    with open(p, 'rb') as f:
+                        h = hashlib.md5(f.read()).hexdigest()
+                    if h in file_hashes:
+                        prev_user, prev_path = file_hashes[h]
+                        if prev_user != user_id:
+                            duplicates_found.append(
+                                (prev_user, prev_path.name, user_id, p.name)
+                            )
+                    else:
+                        file_hashes[h] = (user_id, p)
+                except Exception:
+                    pass
+
+        if duplicates_found:
+            print("\n  ⚠ ВНИМАНИЕ — обнаружены идентичные файлы в разных папках:")
+            for u1, f1, u2, f2 in duplicates_found[:10]:
+                print(f"    {u1}/{f1}  ←→  {u2}/{f2}")
+            print(f"  Это разрушает обучение. Удалите дубликаты вручную!\n")
+        else:
+            print(f"  ✓ Дубликатов между папками не обнаружено")
+
     def _generate_triplets(self):
         """Генерирует триплеты ТОЛЬКО из train-фото."""
         users = list(self.train_images.keys())
@@ -134,19 +171,25 @@ class TripletFaceDataset(Dataset):
         print(f"Сгенерировано триплетов (train): {len(self.triplets)}")
 
     def _setup_transforms(self):
-        """Усиленные аугментации для обучения."""
+        """
+        Аугментации для обучения.
+        Намеренно мягкие — на маленьких лицах 100×100 агрессивные
+        аугментации (особенно RandomErasing) разрушают критичные
+        области (глаза, нос) и ухудшают обучение.
+        """
         self.train_transform = transforms.Compose([
-            transforms.Resize((IMG_SIZE + 12, IMG_SIZE + 12)),
-            transforms.RandomResizedCrop(IMG_SIZE, scale=(0.85, 1.0)),
+            transforms.Resize((IMG_SIZE + 8, IMG_SIZE + 8)),
+            transforms.RandomCrop(IMG_SIZE),
             transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ColorJitter(brightness=0.25, contrast=0.25,
-                                   saturation=0.15, hue=0.05),
-            transforms.RandomRotation(12),
-            transforms.RandomAffine(degrees=0, translate=(0.06, 0.06)),
+            transforms.ColorJitter(brightness=0.15, contrast=0.15,
+                                   saturation=0.10, hue=0.03),
+            transforms.RandomRotation(8),
+            transforms.RandomAffine(degrees=0, translate=(0.04, 0.04)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                  std=[0.229, 0.224, 0.225]),
-            transforms.RandomErasing(p=0.2, scale=(0.02, 0.08)),
+            # RandomErasing убран — на 100x100 лицах он вредит больше
+            # чем помогает (стирает глаза/нос с заметной вероятностью)
         ])
 
         self.val_transform = transforms.Compose([

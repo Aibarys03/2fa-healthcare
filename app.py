@@ -1,7 +1,15 @@
 """
 FastAPI Backend — 2FA система с Face Recognition + OTP
+Исправленная версия (v2):
+  - Убран дубликат create_session
+  - Убран дубликат импорта database
+  - Robust обработка битых картинок (HTTP 400 вместо 500)
+  - Endpoint /api/admin/regenerate-embeddings
+  - Endpoint /api/admin/cleanup-sessions
+  - DEFAULT_THRESHOLD перенесён в начало
+  - Background task для долгого обучения
+  - Чище verify_otp (явное разделение валидного/неверного OTP)
 """
-
 import os
 import io
 import json
@@ -12,20 +20,26 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
-from database import get_otp_secret, save_otp_secret, log_auth, download_model_if_needed
+
 import pyotp
 import qrcode
-from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from PIL import Image, UnidentifiedImageError
+
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from verifier import FaceVerifier
-from database import (get_otp_secret, save_otp_secret, log_auth,
-                       download_model_if_needed,
-                       create_session, get_session,
-                       update_session_attempts, delete_session)
+from database import (
+    get_otp_secret, save_otp_secret, log_auth,
+    download_model_if_needed,
+    create_session, get_session,
+    update_session_attempts, delete_session,
+    get_all_users, get_embedding as db_get_embedding,
+    save_embedding, delete_user_embedding,
+    db,
+)
 from liveness import (
     start_liveness_session,
     process_liveness_frame,
@@ -33,25 +47,32 @@ from liveness import (
     get_liveness_session,
     reset_liveness_session,
 )
-# ─── Инициализация ──────────────────────────────────────────────────────────
+from database import migrate_plaintext_to_encrypted, verify_audit_chain
 
-app = FastAPI(title="2FA Face + OTP System", version="1.0.0")
+# ─── Константы ──────────────────────────────────────────────────────────────
+DEFAULT_THRESHOLD = 0.70
+TRAINING_TIMEOUT_SEC = 1800       # 30 минут — было 600 (10 минут)
+SESSION_LIFETIME_SEC = 300        # 5 минут на ввод OTP
+MAX_OTP_ATTEMPTS = 3
+
+
+# ─── Инициализация ──────────────────────────────────────────────────────────
+app = FastAPI(title="2FA Face + OTP System", version="2.0.0")
 templates = Jinja2Templates(directory="templates")
 
-# Монтирование статических файлов
 os.makedirs("static", exist_ok=True)
 os.makedirs("models", exist_ok=True)
 os.makedirs("data/users", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Глобальный объект верификатора (загружается при наличии модели)
 verifier: Optional[FaceVerifier] = None
+
 
 def load_verifier():
     global verifier
     model_path = "models/best_model.pth"
-    # Если модели нет — скачиваем из Supabase Storage
     download_model_if_needed(model_path)
+
     if os.path.exists(model_path):
         try:
             verifier = FaceVerifier(model_path, "models/embeddings.json")
@@ -62,41 +83,51 @@ def load_verifier():
 
 load_verifier()
 
-# ─── OTP сессии ─────────────────────────────────────────────────────────────
 
-# Временное хранилище OTP сессий (в production - Redis/DB)
-otp_secrets: dict = {}     # {user_id: totp_secret}
-
+# ─── OTP secrets (локальный fallback) ──────────────────────────────────────
+otp_secrets: dict = {}
 OTP_SECRETS_FILE = 'models/otp_secrets.json'
+
 
 def load_otp_secrets():
     if os.path.exists(OTP_SECRETS_FILE):
         with open(OTP_SECRETS_FILE, 'r') as f:
             otp_secrets.update(json.load(f))
 
+
 def save_otp_secrets():
     with open(OTP_SECRETS_FILE, 'w') as f:
         json.dump(otp_secrets, f)
 
+
 load_otp_secrets()
 
+
 def get_or_create_otp_secret(user_id: str) -> str:
-    secret = get_otp_secret(user_id)   # из Supabase
+    secret = get_otp_secret(user_id)
     if not secret:
         secret = pyotp.random_base32()
-        save_otp_secret(user_id, secret)  # в Supabase
+        save_otp_secret(user_id, secret)
     return secret
 
 
 # ─── Вспомогательные функции ────────────────────────────────────────────────
 
 def image_from_upload(file_bytes: bytes) -> Image.Image:
-    return Image.open(io.BytesIO(file_bytes)).convert('RGB')
+    """Безопасное чтение картинки из upload. Бросает HTTP 400 при ошибке."""
+    if not file_bytes:
+        raise HTTPException(400, "Пустой файл")
+    try:
+        return Image.open(io.BytesIO(file_bytes)).convert('RGB')
+    except (UnidentifiedImageError, OSError, ValueError) as e:
+        raise HTTPException(400, f"Не удалось распознать изображение: {e}")
+
 
 def image_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format='JPEG', quality=80)
     return base64.b64encode(buf.getvalue()).decode()
+
 
 def get_training_history():
     path = 'models/training_history.json'
@@ -106,7 +137,7 @@ def get_training_history():
     return None
 
 
-# ─── HTML страницы ───────────────────────────────────────────────────────────
+# ─── HTML страницы ──────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -121,9 +152,11 @@ async def index(request: Request):
         "history": history
     })
 
+
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
+
 
 @app.get("/verify", response_class=HTMLResponse)
 async def verify_page(request: Request):
@@ -133,9 +166,9 @@ async def verify_page(request: Request):
         "registered_users": users
     })
 
+
 @app.get("/upload-data", response_class=HTMLResponse)
 async def upload_data_page(request: Request):
-    # Показывает текущую структуру данных
     users_info = []
     data_dir = Path('data/users')
     if data_dir.exists():
@@ -144,33 +177,27 @@ async def upload_data_page(request: Request):
                 imgs = list(user_dir.glob('*.jpg')) + list(user_dir.glob('*.jpeg')) + \
                        list(user_dir.glob('*.png'))
                 users_info.append({'name': user_dir.name, 'count': len(imgs)})
-    
     return templates.TemplateResponse("upload_data.html", {
         "request": request,
         "users_info": users_info
     })
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
-    from database import get_all_users, get_embedding, get_otp_secret
-    import json
-
-    # Получаем список пользователей с доп. инфо
     user_ids = verifier.get_registered_users() if verifier else []
     users = []
     for uid in user_ids:
         has_otp = get_otp_secret(uid) is not None
-        # Получаем дату из Supabase если есть
         try:
-            from database import db
             res = db().table("user_embeddings").select("created_at").eq("user_id", uid).execute()
             created_at = res.data[0]["created_at"] if res.data else None
-        except:
+        except Exception:
             created_at = None
         users.append({"user_id": uid, "has_otp": has_otp, "created_at": created_at})
 
     history = get_training_history()
     threshold = verifier.threshold if verifier else DEFAULT_THRESHOLD
-
     return templates.TemplateResponse("admin.html", {
         "request": request,
         "users": users,
@@ -178,6 +205,7 @@ async def admin_page(request: Request):
         "history": history,
         "threshold": threshold,
     })
+
 
 # ─── API: Загрузка данных для обучения ──────────────────────────────────────
 
@@ -192,12 +220,13 @@ async def upload_training_data(
 
     saved = 0
     errors = []
+
     for f in files:
         try:
             content = await f.read()
             img = Image.open(io.BytesIO(content)).convert('RGB')
-            # Сохраняем в стандартном размере
             img = img.resize((300, 300), Image.LANCZOS)
+
             filename = f"{user_id}_{saved+1:03d}.jpg"
             img.save(user_dir / filename, 'JPEG', quality=95)
             saved += 1
@@ -212,18 +241,19 @@ async def upload_training_data(
         "errors": errors
     }
 
+
+# ─── Admin: управление пользователями ───────────────────────────────────────
+
 @app.delete("/api/admin/delete-user/{user_id}")
 async def admin_delete_user(user_id: str):
     import shutil
-    # Удаляем локальные данные
     user_dir = Path(f'data/users/{user_id}')
     if user_dir.exists():
         shutil.rmtree(user_dir)
-    # Удаляем из verifier (память)
+
     if verifier:
         verifier.delete_user(user_id)
-    # Удаляем из Supabase
-    from database import delete_user_embedding
+
     delete_user_embedding(user_id)
     return {"success": True, "message": f"Пользователь {user_id} удалён"}
 
@@ -231,7 +261,6 @@ async def admin_delete_user(user_id: str):
 @app.get("/api/admin/user-stats/{user_id}")
 async def admin_user_stats(user_id: str):
     try:
-        from database import db
         res = db().table("auth_logs") \
             .select("success, face_similarity, face_passed, otp_passed") \
             .eq("user_id", user_id) \
@@ -247,17 +276,13 @@ async def admin_user_stats(user_id: str):
             "success_count": success_count,
             "avg_similarity": avg_sim,
         }
-    except Exception as e:
+    except Exception:
         return {"user_id": user_id, "total": 0, "success_count": 0, "avg_similarity": None}
-
-
-# ── API: Логи аутентификации ──────────────────────────────────────────────────
 
 
 @app.get("/api/admin/logs")
 async def admin_logs(filter: str = "all", limit: int = 50):
     try:
-        from database import db
         query = db().table("auth_logs") \
             .select("*") \
             .order("created_at", desc=True) \
@@ -270,6 +295,103 @@ async def admin_logs(filter: str = "all", limit: int = 50):
         return {"logs": res.data or []}
     except Exception as e:
         return {"logs": [], "error": str(e)}
+
+
+@app.post("/api/admin/regenerate-embeddings")
+async def admin_regenerate_embeddings():
+    """
+    Пересчитывает embeddings для всех пользователей в data/users/
+    с использованием текущей CNN. Нужно вызывать после переобучения.
+    """
+    if not verifier:
+        raise HTTPException(400, "Модель не загружена")
+
+    data_dir = Path("data/users")
+    if not data_dir.exists():
+        raise HTTPException(400, "Папка data/users/ не найдена")
+
+    valid_ext = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+    processed = []
+    failed = []
+
+    for user_dir in sorted(data_dir.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        images = [p for p in sorted(user_dir.iterdir()) if p.suffix.lower() in valid_ext]
+        if not images:
+            continue
+
+        try:
+            pil_images = [Image.open(p).convert("RGB") for p in images]
+            result = verifier.register_user(user_dir.name, pil_images)
+            if result.get("success"):
+                processed.append({
+                    "user_id": user_dir.name,
+                    "photos_used": result.get("photos_used", len(images)),
+                })
+            else:
+                failed.append({"user_id": user_dir.name, "error": result.get("error")})
+        except Exception as e:
+            failed.append({"user_id": user_dir.name, "error": str(e)})
+
+    return {
+        "success": True,
+        "processed": processed,
+        "failed": failed,
+        "total_processed": len(processed),
+        "total_failed": len(failed),
+    }
+
+
+@app.post("/api/admin/migrate-encryption")
+async def admin_migrate_encryption():
+    """
+    Одноразовая миграция: перешифровывает все plaintext embeddings
+    в формат AES-256-GCM. Запускать после первоначального развёртывания
+    шифрования.
+
+    После успешного запуска все embeddings в Supabase будут зашифрованы;
+    повторный вызов безопасен (идемпотентен) — уже зашифрованные записи
+    пропускаются.
+    """
+    result = migrate_plaintext_to_encrypted()
+    if not result.get("success"):
+        raise HTTPException(500, f"Migration failed: {result.get('error')}")
+    return result
+
+
+@app.get("/api/admin/verify-audit-chain")
+async def admin_verify_audit_chain(limit: int = 1000):
+    """
+    Проверяет целостность tamper-evident audit-журнала.
+    Возвращает:
+      - valid: True если цепочка корректна
+      - records_checked: сколько записей проверено
+      - broken_at: индексы записей с обнаруженными нарушениями
+      - details: текстовые описания нарушений
+
+    Если valid=False — это означает, что кто-то изменил или удалил
+    запись в auth_logs минуя API. Это критический инцидент безопасности.
+    """
+    result = verify_audit_chain(limit=limit)
+    return result
+
+@app.post("/api/admin/cleanup-sessions")
+async def admin_cleanup_sessions():
+    """
+    Удаляет из Supabase все otp_sessions с expires_at в прошлом.
+    Можно вызывать вручную или через cron каждые 10 минут.
+    """
+    try:
+        now = time.time()
+        res = db().table("otp_sessions") \
+            .delete() \
+            .lt("expires_at", now) \
+            .execute()
+        deleted_count = len(res.data) if res.data else 0
+        return {"success": True, "deleted_sessions": deleted_count}
+    except Exception as e:
+        raise HTTPException(500, f"Ошибка очистки: {e}")
 
 
 @app.get("/api/dataset-info")
@@ -290,18 +412,30 @@ async def dataset_info():
     }
 
 
-# ─── API: Обучение модели ────────────────────────────────────────────────────
+# ─── API: Обучение модели ───────────────────────────────────────────────────
 
-@app.post("/api/train")
-async def start_training(epochs: int = Form(30)):
-    """Запускает обучение модели (синхронно для простоты)."""
+# Глобальное состояние тренировки (для асинхронного запуска)
+_training_state = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "success": None,
+    "output_tail": None,
+    "error": None,
+}
+
+
+def _do_training(epochs: int):
+    """Запускается в background task — обучение на 30 минут максимум."""
     import subprocess
     import sys
 
-    data_dir = Path('data/users')
-    user_dirs = [d for d in data_dir.iterdir() if d.is_dir()]
-    if len(user_dirs) < 2:
-        raise HTTPException(400, "Нужно минимум 2 пользователя с фото")
+    _training_state["running"] = True
+    _training_state["started_at"] = time.time()
+    _training_state["finished_at"] = None
+    _training_state["success"] = None
+    _training_state["output_tail"] = None
+    _training_state["error"] = None
 
     try:
         result = subprocess.run(
@@ -309,9 +443,9 @@ async def start_training(epochs: int = Form(30)):
              '--data_dir', 'data/users',
              '--epochs', str(epochs),
              '--save_dir', 'models'],
-            capture_output=True, text=True, timeout=600
+            capture_output=True, text=True,
+            timeout=TRAINING_TIMEOUT_SEC,
         )
-
         if result.returncode == 0:
             load_verifier()
             try:
@@ -319,19 +453,55 @@ async def start_training(epochs: int = Form(30)):
                 sync_static()
             except Exception:
                 pass
-            # Перезагружаем модель
-            return {
-                "success": True,
-                "message": "Обучение завершено!",
-                "output": result.stdout[-2000:]  # Последние 2000 символов
-            }
+            _training_state["success"] = True
+            _training_state["output_tail"] = result.stdout[-2000:]
         else:
-            return {
-                "success": False,
-                "error": result.stderr[-1000:]
-            }
+            _training_state["success"] = False
+            _training_state["error"] = result.stderr[-1000:]
     except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Превышено время обучения (10 минут)"}
+        _training_state["success"] = False
+        _training_state["error"] = f"Превышено время обучения ({TRAINING_TIMEOUT_SEC // 60} минут)"
+    except Exception as e:
+        _training_state["success"] = False
+        _training_state["error"] = str(e)
+    finally:
+        _training_state["running"] = False
+        _training_state["finished_at"] = time.time()
+
+
+@app.post("/api/train")
+async def start_training(background_tasks: BackgroundTasks, epochs: int = Form(30)):
+    """
+    Запускает обучение в фоне. Возвращает сразу.
+    Прогресс/результат — через GET /api/train-status.
+    """
+    data_dir = Path('data/users')
+    user_dirs = [d for d in data_dir.iterdir() if d.is_dir()]
+    if len(user_dirs) < 2:
+        raise HTTPException(400, "Нужно минимум 2 пользователя с фото")
+
+    if _training_state["running"]:
+        return {"success": False, "error": "Обучение уже запущено"}
+
+    background_tasks.add_task(_do_training, epochs)
+    return {
+        "success": True,
+        "message": f"Обучение запущено в фоне ({epochs} эпох). "
+                   f"Проверяйте /api/train-status каждые 30 секунд.",
+    }
+
+
+@app.get("/api/train-status")
+async def train_status():
+    """Текущий статус последнего обучения."""
+    return {
+        "running": _training_state["running"],
+        "started_at": _training_state["started_at"],
+        "finished_at": _training_state["finished_at"],
+        "success": _training_state["success"],
+        "error": _training_state["error"],
+        "output_tail": _training_state["output_tail"],
+    }
 
 
 # ─── API: Регистрация пользователя ──────────────────────────────────────────
@@ -353,11 +523,9 @@ async def register_user(
     result = verifier.register_user(user_id, images)
 
     if result['success']:
-        # Создаём OTP секрет для пользователя
         secret = get_or_create_otp_secret(user_id)
         totp = pyotp.TOTP(secret)
 
-        # Генерируем QR-код
         uri = totp.provisioning_uri(name=user_id, issuer_name="2FA Healthcare")
         qr = qrcode.make(uri)
         buf = io.BytesIO()
@@ -370,12 +538,12 @@ async def register_user(
     return result
 
 
-# ─── API: Верификация (2FA) ──────────────────────────────────────────────────
+# ─── API: Верификация (2FA) ─────────────────────────────────────────────────
 
 @app.post("/api/verify-face")
 async def verify_face(
-        user_id: str = Form(...),
-        file: UploadFile = File(...)
+    user_id: str = Form(...),
+    file: UploadFile = File(...)
 ):
     if not verifier:
         raise HTTPException(400, "Модель не загружена")
@@ -387,34 +555,35 @@ async def verify_face(
 
     if result.get('verified'):
         session_id = secrets.token_urlsafe(32)
-        expires_at = time.time() + 300
+        expires_at = time.time() + SESSION_LIFETIME_SEC
 
-        # Создаём сессию в Supabase
+        # Создаём face-сессию в Supabase
         create_session(session_id, user_id, expires_at, result['similarity'])
 
-        # ── НОВОЕ: создаём отдельную liveness-сессию ──
+        # Создаём liveness-сессию в памяти (отдельно от face-сессии)
         start_liveness_session(session_id)
 
         result['session_id'] = session_id
-        # ── ИЗМЕНЕНО: теперь следующий шаг — liveness, а не сразу OTP ──
+        # Указываем фронту что следующий шаг — liveness, а не сразу OTP
         result['next_step'] = 'liveness'
         result['message'] = 'Лицо распознано. Подтвердите, что вы живой человек — моргните.'
     else:
-        log_auth(user_id, result['similarity'], False, False, False)
-        result['message'] = f'Верификация не пройдена (сходство: {result["similarity"]:.3f})'
+        log_auth(user_id, result.get('similarity', 0.0), False, False, False)
+        sim = result.get("similarity", 0.0)
+        result['message'] = f'Верификация не пройдена (сходство: {sim:.3f})'
 
     return result
 
 
+# ─── Liveness Detection ─────────────────────────────────────────────────────
+
 @app.post("/api/verify-liveness")
 async def verify_liveness(
-    session_id: str = Form(...),
-    file: UploadFile = File(...)
+        session_id: str = Form(...),
+        file: UploadFile = File(...)
 ):
     session = get_session(session_id)
     if not session:
-        # Сессия удалена либо никогда не существовала.
-        # НЕ кидаем 400 — отдаём структурный ответ, фронт сам решит.
         end_liveness_session(session_id)
         return {"status": "session_expired",
                 "reason": "face_session_not_found"}
@@ -429,31 +598,75 @@ async def verify_liveness(
     image = image_from_upload(content)
     result = process_liveness_frame(session_id, image)
 
+    # ────────────────────────────────────────────────────────────
+    # НОВОЕ: при успешном моргании выполняем ВТОРИЧНУЮ CNN-проверку
+    # ────────────────────────────────────────────────────────────
+    if result["status"] == "success":
+        live_session = get_liveness_session(session_id)
+        if live_session and live_session.last_open_frame_pil and verifier:
+            user_id = session['user_id']
+            try:
+                # Повторно вериф embedding пользователя против кадра с камеры
+                second_check = verifier.verify(
+                    user_id, live_session.last_open_frame_pil
+                )
+                second_sim = second_check.get("similarity", 0.0)
+                second_passed = second_check.get("verified", False)
+
+                # Дополнительная информация в ответе
+                result["second_cnn_check"] = {
+                    "similarity": round(second_sim, 4),
+                    "passed": bool(second_passed),
+                }
+
+                if not second_passed:
+                    # Атака обнаружена: лицо в камере НЕ соответствует
+                    # тому, что было загружено на шаге 1
+                    log_auth(
+                        user_id, second_sim,
+                        face_ok=True,  # первая проверка прошла
+                        otp_ok=False,
+                        success=False,
+                    )
+                    delete_session(session_id)
+                    end_liveness_session(session_id)
+                    return {
+                        "status": "failed",
+                        "reason": "second_cnn_mismatch",
+                        "second_cnn_check": result["second_cnn_check"],
+                        "session_expired": True,
+                        "message": (
+                            "Лицо в момент моргания не соответствует "
+                            "загруженному фото. Возможна попытка обхода "
+                            "через чужое фото."
+                        ),
+                    }
+            except Exception as e:
+                # Если double-check не удался по техническим причинам —
+                # логируем, но не блокируем (fail-open для UX);
+                # альтернатива — fail-closed: result["status"] = "failed"
+                logger.error(f"Second CNN check failed for {session_id}: {e}")
+
     if result["status"] == "failed":
-        # Считаем сколько раз подряд проваливалась liveness
         live = get_liveness_session(session_id)
-        # liveness-сессия уже могла быть стёрта внутри process_liveness_frame,
-        # поэтому проверяем
         if live is None or getattr(live, "fail_count", 0) >= 2:
-            # Третий провал подряд — закрываем всё и заставляем начать заново
             log_auth(session['user_id'], session['face_similarity'],
                      face_ok=True, otp_ok=False, success=False)
             delete_session(session_id)
             end_liveness_session(session_id)
             result["session_expired"] = True
         else:
-            # Только что упало — сохраняем счётчик, НЕ удаляем face-сессию
             if live is not None:
                 live.fail_count = getattr(live, "fail_count", 0) + 1
 
     return result
+
+
 @app.post("/api/reset-liveness")
 async def reset_liveness(session_id: str = Form(...)):
     """
     Кнопка 'Попробовать ещё раз' с фронта.
-    Если face-сессия ещё жива — обнуляем liveness-FSM.
-    Если face-сессия уже истекла — отдаём session_expired
-    (фронт перезагрузит UI, попросит снова сфотографироваться).
+    Обнуляет состояние liveness-FSM, не убивая face-сессию.
     """
     session = get_session(session_id)
     if not session:
@@ -471,10 +684,11 @@ async def reset_liveness(session_id: str = Form(...)):
     return {"status": "ok",
             "message": "Liveness reset, please blink again"}
 
+
 @app.post("/api/verify-otp")
 async def verify_otp(
-        session_id: str = Form(...),
-        otp_code: str = Form(...)
+    session_id: str = Form(...),
+    otp_code: str = Form(...)
 ):
     session = get_session(session_id)
     if not session:
@@ -485,7 +699,7 @@ async def verify_otp(
         end_liveness_session(session_id)
         raise HTTPException(400, "Сессия истекла. Начните заново.")
 
-    # ── НОВОЕ: liveness обязательна перед вводом OTP ──
+    # Liveness обязательна перед вводом OTP
     live = get_liveness_session(session_id)
     if live is None or not live.blink_detected or not live.passive_passed:
         raise HTTPException(
@@ -493,12 +707,12 @@ async def verify_otp(
             "Liveness-проверка не пройдена. Подтвердите живость прежде чем вводить OTP."
         )
 
-    if session['attempts'] >= 3:
+    if session['attempts'] >= MAX_OTP_ATTEMPTS:
         delete_session(session_id)
         end_liveness_session(session_id)
         return {
             'authenticated': False,
-            'error': 'Превышено число попыток (3). Начните заново.'
+            'error': f'Превышено число попыток ({MAX_OTP_ATTEMPTS}). Начните заново.'
         }
 
     user_id = session['user_id']
@@ -512,10 +726,12 @@ async def verify_otp(
     new_attempts = session['attempts'] + 1
     update_session_attempts(session_id, new_attempts)
 
+    # Логируем результат до удаления сессии
+    log_auth(user_id, session['face_similarity'], True, valid, valid)
+
     if valid:
         delete_session(session_id)
-        end_liveness_session(session_id)  # ← добавлено
-        log_auth(user_id, session['face_similarity'], True, True, True)
+        end_liveness_session(session_id)
         return {
             'authenticated': True,
             'user_id': user_id,
@@ -523,20 +739,21 @@ async def verify_otp(
             'message': f'✓ Аутентификация успешна! Добро пожаловать, {user_id}!',
             'timestamp': datetime.now().isoformat()
         }
-    else:
-        attempts_left = 3 - new_attempts
-        if attempts_left <= 0:
-            delete_session(session_id)
-            end_liveness_session(session_id)  # ← добавлено
-        log_auth(user_id, session['face_similarity'], True, False, False)
-        return {
-            'authenticated': False,
-            'attempts_left': attempts_left,
-            'message': f'Неверный OTP. Осталось попыток: {attempts_left}'
-        }
+
+    # Неверный OTP
+    attempts_left = MAX_OTP_ATTEMPTS - new_attempts
+    if attempts_left <= 0:
+        delete_session(session_id)
+        end_liveness_session(session_id)
+
+    return {
+        'authenticated': False,
+        'attempts_left': max(0, attempts_left),
+        'message': f'Неверный OTP. Осталось попыток: {max(0, attempts_left)}'
+    }
 
 
-# ─── API: Статистика ─────────────────────────────────────────────────────────
+# ─── API: Статистика ────────────────────────────────────────────────────────
 
 @app.get("/api/model-info")
 async def model_info():
@@ -547,21 +764,28 @@ async def model_info():
         "threshold": verifier.threshold if verifier else DEFAULT_THRESHOLD
     }
 
-    # История обучения
     history = get_training_history()
     if history:
         info['training'] = {
-            'epochs': len(history['loss']),
-            'final_loss': round(history['loss'][-1], 4),
-            'best_accuracy': round(max(history['accuracy']), 1),
-            'final_accuracy': round(history['accuracy'][-1], 1)
+            'epochs': len(history.get('loss', [])),
+            'final_loss': round(history['loss'][-1], 4) if history.get('loss') else None,
+            'best_accuracy': round(max(history['accuracy']), 1) if history.get('accuracy') else None,
+            'final_accuracy': round(history['accuracy'][-1], 1) if history.get('accuracy') else None,
         }
+        if 'final_metrics' in history:
+            fm = history['final_metrics']
+            info['final_metrics'] = {
+                'far': round(fm.get('far', 0), 2),
+                'frr': round(fm.get('frr', 0), 2),
+                'eer': round(fm.get('eer', 0), 2),
+                'roc_auc': round(fm.get('roc_auc', 0), 4),
+                'optimal_threshold': round(fm.get('optimal_threshold', 0.7), 3),
+            }
 
-    # Информация о checkpoint
     checkpoint_path = 'models/best_model.pth'
     if os.path.exists(checkpoint_path):
         import torch
-        cp = torch.load(checkpoint_path, map_location='cpu')
+        cp = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
         info['model_details'] = {
             'best_epoch': cp.get('epoch'),
             'accuracy': round(cp.get('accuracy', 0), 1),
@@ -571,7 +795,6 @@ async def model_info():
 
     return info
 
-DEFAULT_THRESHOLD = 0.70
 
 if __name__ == '__main__':
     import uvicorn
