@@ -1,15 +1,3 @@
-"""
-FastAPI Backend — 2FA система с Face Recognition + OTP
-Исправленная версия (v2):
-  - Убран дубликат create_session
-  - Убран дубликат импорта database
-  - Robust обработка битых картинок (HTTP 400 вместо 500)
-  - Endpoint /api/admin/regenerate-embeddings
-  - Endpoint /api/admin/cleanup-sessions
-  - DEFAULT_THRESHOLD перенесён в начало
-  - Background task для долгого обучения
-  - Чище verify_otp (явное разделение валидного/неверного OTP)
-"""
 import os
 import io
 import json
