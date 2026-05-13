@@ -384,7 +384,7 @@ async function verifyFace() {
           setStep(3);
           showOtpForm(data.session_id);
         }
-      }, 700);
+      }, 1500);
     } else {
       resultDiv.className = 'face-result fail';
       document.getElementById('resultIcon').textContent = '❌';
@@ -435,27 +435,34 @@ async function startLivenessFlow(sid) {
   }
 }
 
+let livenessFrameInFlight = false;
+
 async function sendLivenessFrame() {
   if (!livenessSessionId) { stopLiveness(); return; }
 
-  const video = document.getElementById('livenessVideo');
-  const canvas = document.getElementById('livenessCanvas');
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  const blob = await new Promise(resolve =>
-    canvas.toBlob(resolve, 'image/jpeg', 0.85)
-  );
-
-  const formData = new FormData();
-  formData.append('session_id', livenessSessionId);
-  formData.append('file', blob, 'frame.jpg');
+  // Защита от параллельных запросов
+  if (livenessFrameInFlight) return;
+  livenessFrameInFlight = true;
 
   try {
+    const video = document.getElementById('livenessVideo');
+    const canvas = document.getElementById('livenessCanvas');
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise(resolve =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.85)
+    );
+
+    const formData = new FormData();
+    formData.append('session_id', livenessSessionId);
+    formData.append('file', blob, 'frame.jpg');
+
     const res = await fetch('/api/verify-liveness', {
       method: 'POST',
       body: formData
     });
+
     if (!res.ok) {
       const txt = await res.text();
       console.error('Liveness HTTP error', res.status, txt);
@@ -463,10 +470,14 @@ async function sendLivenessFrame() {
       showLivenessResult('error', 'Ошибка сервера: ' + res.status);
       return;
     }
+
     const data = await res.json();
     handleLivenessResponse(data);
+
   } catch (err) {
     console.error('Liveness frame fetch error', err);
+  } finally {
+    livenessFrameInFlight = false;
   }
 }
 

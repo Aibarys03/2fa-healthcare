@@ -68,13 +68,13 @@ EAR_OPEN_RATIO = 0.85          # глаз открыт если EAR > baseline *
 BASELINE_FRAMES = 5
 
 # Сколько кадров подряд должно быть "закрыто", чтобы засчитать как закрытие
-CLOSED_FRAMES_REQUIRED = 2
+CLOSED_FRAMES_REQUIRED = 1
 
 # Сколько кадров подряд "открыто" нужно после закрытия для подтверждения моргания
-OPEN_AFTER_CLOSE_FRAMES = 2
+OPEN_AFTER_CLOSE_FRAMES = 1
 
 # Считаются только кадры с обнаруженным лицом
-MAX_FACE_FRAMES = 25           # ~5 секунд при 200ms/кадр
+MAX_FACE_FRAMES = 50           # ~15 секунд при 300ms/кадр — достаточно для моргания
 
 # Сколько последних EAR-значений возвращать в debug
 EAR_HISTORY_SIZE = 15

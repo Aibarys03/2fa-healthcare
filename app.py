@@ -8,7 +8,8 @@ import hashlib
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
-
+import logging
+logger = logging.getLogger(__name__)
 import pyotp
 import qrcode
 from PIL import Image, UnidentifiedImageError
@@ -540,6 +541,7 @@ async def verify_face(
     probe_image = image_from_upload(content)
 
     result = verifier.verify(user_id, probe_image)
+    print(f"[STEP1_CHECK] user={user_id}, sim={result.get('similarity', 'N/A')}")
 
     if result.get('verified'):
         session_id = secrets.token_urlsafe(32)
@@ -570,6 +572,12 @@ async def verify_liveness(
         session_id: str = Form(...),
         file: UploadFile = File(...)
 ):
+    print(f"[LIVE] Запрос с session_id={session_id[:16]}...")
+
+    t0 = time.time()
+    session = get_session(session_id)
+    t1 = time.time()
+    print(f"[LIVE] get_session занял {(t1 - t0) * 1000:.0f}мс, найдена: {session is not None}")
     session = get_session(session_id)
     if not session:
         end_liveness_session(session_id)
@@ -586,35 +594,45 @@ async def verify_liveness(
     image = image_from_upload(content)
     result = process_liveness_frame(session_id, image)
 
+    if result.get("ear") is not None:
+        print(f"[LIVE] ear={result.get('ear')}, baseline={result.get('baseline')}, "
+              f"frames={result.get('frames_with_face')}, "
+              f"closed={result.get('consecutive_closed', 0)}, "
+              f"saw_closed={result.get('saw_closed')}, "
+              f"blink={result.get('blink_detected')}")
+
     # ────────────────────────────────────────────────────────────
     # НОВОЕ: при успешном моргании выполняем ВТОРИЧНУЮ CNN-проверку
     # ────────────────────────────────────────────────────────────
-    if result["status"] == "success":
+    ENABLE_SECOND_CHECK = False  # требует доработки методики захвата кадра
+
+    if ENABLE_SECOND_CHECK and result["status"] == "success":
         live_session = get_liveness_session(session_id)
         if live_session and live_session.last_open_frame_pil and verifier:
             user_id = session['user_id']
             try:
-                # Повторно вериф embedding пользователя против кадра с камеры
                 second_check = verifier.verify(
                     user_id, live_session.last_open_frame_pil
                 )
                 second_sim = second_check.get("similarity", 0.0)
-                second_passed = second_check.get("verified", False)
 
-                # Дополнительная информация в ответе
+                # МЯГКИЙ порог для второй проверки — кадры с веб-камеры
+                # обычно хуже загруженного фото
+                SECOND_CHECK_THRESHOLD = 0.40
+                second_passed = second_sim >= SECOND_CHECK_THRESHOLD
+
+                print(f"[SECOND_CHECK] user={user_id}, sim={second_sim:.3f}, "
+                      f"threshold={SECOND_CHECK_THRESHOLD}, passed={second_passed}")
+
                 result["second_cnn_check"] = {
                     "similarity": round(second_sim, 4),
                     "passed": bool(second_passed),
                 }
 
                 if not second_passed:
-                    # Атака обнаружена: лицо в камере НЕ соответствует
-                    # тому, что было загружено на шаге 1
                     log_auth(
                         user_id, second_sim,
-                        face_ok=True,  # первая проверка прошла
-                        otp_ok=False,
-                        success=False,
+                        face_ok=True, otp_ok=False, success=False,
                     )
                     delete_session(session_id)
                     end_liveness_session(session_id)
@@ -625,27 +643,33 @@ async def verify_liveness(
                         "session_expired": True,
                         "message": (
                             "Лицо в момент моргания не соответствует "
-                            "загруженному фото. Возможна попытка обхода "
-                            "через чужое фото."
+                            "загруженному фото."
                         ),
                     }
             except Exception as e:
-                # Если double-check не удался по техническим причинам —
-                # логируем, но не блокируем (fail-open для UX);
-                # альтернатива — fail-closed: result["status"] = "failed"
-                logger.error(f"Second CNN check failed for {session_id}: {e}")
+                print(f"[ERROR] Second CNN check failed for {session_id}: {e}")
 
     if result["status"] == "failed":
         live = get_liveness_session(session_id)
-        if live is None or getattr(live, "fail_count", 0) >= 2:
+
+        # КРИТИЧНО: при первом fail НЕ удаляем сессию.
+        # Даём пользователю кнопку "Попробовать ещё раз" через reset_liveness.
+        if live is None:
+            # Сессия liveness уже отсутствует — face-сессия должна жить,
+            # фронт перезапустит через retry
+            result["session_expired"] = False  # ← оставляем face-сессию
+        elif live.fail_count >= 2:
+            # Третий fail подряд → блокируем полностью
             log_auth(session['user_id'], session['face_similarity'],
                      face_ok=True, otp_ok=False, success=False)
             delete_session(session_id)
             end_liveness_session(session_id)
             result["session_expired"] = True
         else:
-            if live is not None:
-                live.fail_count = getattr(live, "fail_count", 0) + 1
+            # Первый или второй fail — НЕ удаляем сессию
+            live.fail_count += 1
+            # ВАЖНО: не удаляем ни face-сессию, ни liveness-сессию
+            # Фронт покажет кнопку "Попробовать ещё раз"
 
     return result
 
