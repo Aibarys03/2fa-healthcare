@@ -38,14 +38,14 @@ from liveness import (
 )
 from database import migrate_plaintext_to_encrypted, verify_audit_chain
 
-# ─── Константы ──────────────────────────────────────────────────────────────
+# ─── Константы ──────
 DEFAULT_THRESHOLD = 0.70
 TRAINING_TIMEOUT_SEC = 1800       # 30 минут — было 600 (10 минут)
 SESSION_LIFETIME_SEC = 300        # 5 минут на ввод OTP
 MAX_OTP_ATTEMPTS = 3
 
 
-# ─── Инициализация ──────────────────────────────────────────────────────────
+# ─── Инициализация ──────
 app = FastAPI(title="2FA Face + OTP System", version="2.0.0")
 templates = Jinja2Templates(directory="templates")
 
